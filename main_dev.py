@@ -11,6 +11,7 @@ FPS = 60
 GRAVITY = 900.0  # px/s^2
 FIRE_INTERVAL = 3.0
 CANNON_MUZZLE_SPEED = 980
+PHYSICS_SUBSTEPS = 5
 GROUND_Y = HEIGHT - 40
 CANNON_MIN_ANGLE_DEG = 25
 CANNON_MAX_ANGLE_DEG = 65
@@ -84,7 +85,7 @@ class Caterpillar:
 
 class Projectile:
     def __init__(self, pos: pygame.Vector2, vel: pygame.Vector2, owner: str):
-        self.body = Body(rect=pygame.Rect(0, 0, 10, 10), vel=vel, mass=0.4, dynamic=True)
+        self.body = Body(rect=pygame.Rect(0, 0, 10, 10), vel=vel, mass=1.8, dynamic=True)
         self.body.rect.center = (int(pos.x), int(pos.y))
         self.owner = owner
         self.alive = True
@@ -147,38 +148,92 @@ class PhysicsEngine:
         self.blocks = blocks
         self.caterpillars = caterpillars
 
+    @staticmethod
+    def _horizontal_overlap(a: pygame.Rect, b: pygame.Rect) -> int:
+        return max(0, min(a.right, b.right) - max(a.left, b.left))
+
+    def _is_supported(self, block: CastleBlock) -> bool:
+        body = block.body
+        if body.rect.bottom >= GROUND_Y:
+            return True
+        probe = body.rect.move(0, 2)
+        for other in self.blocks:
+            if other is block:
+                continue
+            if probe.colliderect(other.body.rect):
+                if self._horizontal_overlap(body.rect, other.body.rect) >= 6:
+                    return True
+        return False
+
+    def _resolve_block_collisions(self, block: CastleBlock, move_x: float, move_y: float):
+        body = block.body
+        for other in self.blocks:
+            if other is block or not body.rect.colliderect(other.body.rect):
+                continue
+
+            overlap = body.rect.clip(other.body.rect)
+            if overlap.width <= 0 or overlap.height <= 0:
+                continue
+
+            if overlap.width < overlap.height:
+                if move_x > 0:
+                    body.rect.right = other.body.rect.left
+                elif move_x < 0:
+                    body.rect.left = other.body.rect.right
+                else:
+                    body.rect.x += -overlap.width if body.rect.centerx < other.body.rect.centerx else overlap.width
+                body.vel.x = 0
+            else:
+                if move_y > 0:
+                    body.rect.bottom = other.body.rect.top
+
+                    support_width = self._horizontal_overlap(body.rect, other.body.rect)
+                    support_ratio = support_width / max(1, body.rect.width)
+                    if support_ratio < 0.6:
+                        support_center = (max(body.rect.left, other.body.rect.left) + min(body.rect.right, other.body.rect.right)) * 0.5
+                        direction = 1 if support_center < body.rect.centerx else -1
+                        body.vel.x += direction * (220 * (0.6 - support_ratio))
+                elif move_y < 0:
+                    body.rect.top = other.body.rect.bottom
+                else:
+                    body.rect.y += -overlap.height if body.rect.centery < other.body.rect.centery else overlap.height
+                body.vel.y = 0
+
     def update(self, dt: float):
         for block in self.blocks:
-            body = block.body
-            if not body.dynamic:
-                continue
-            body.vel.y += GRAVITY * dt
-            body.rect.x += int(body.vel.x * dt)
-            body.rect.y += int(body.vel.y * dt)
+            if not block.body.dynamic and not self._is_supported(block):
+                block.body.dynamic = True
 
-            if body.rect.bottom >= GROUND_Y:
-                body.rect.bottom = GROUND_Y
-                body.vel.y *= -0.18
-                body.vel.x *= 0.85
-                if abs(body.vel.y) < 10:
+        step_dt = dt / PHYSICS_SUBSTEPS
+        for _ in range(PHYSICS_SUBSTEPS):
+            for block in self.blocks:
+                body = block.body
+                if not body.dynamic:
+                    continue
+
+                body.vel.y += GRAVITY * step_dt
+
+                dx = body.vel.x * step_dt
+                body.rect.x += int(round(dx))
+                self._resolve_block_collisions(block, dx, 0)
+
+                dy = body.vel.y * step_dt
+                body.rect.y += int(round(dy))
+
+                if body.rect.bottom >= GROUND_Y:
+                    body.rect.bottom = GROUND_Y
                     body.vel.y = 0
+                    body.vel.x *= 0.82
 
-            for other in self.blocks:
-                if other is block:
-                    continue
-                if not body.rect.colliderect(other.body.rect):
-                    continue
-                if body.rect.centery < other.body.rect.centery:
-                    body.rect.bottom = other.body.rect.top
-                    body.vel.y *= -0.1
+                self._resolve_block_collisions(block, 0, dy)
+
+                if body.rect.bottom >= GROUND_Y - 1:
+                    body.vel.x *= 0.9
                 else:
-                    overlap = body.rect.clip(other.body.rect)
-                    if overlap.width < overlap.height:
-                        body.rect.x += overlap.width if body.rect.centerx < other.body.rect.centerx else -overlap.width
-                        body.vel.x *= -0.05
-                    else:
-                        body.rect.y += overlap.height if body.rect.centery < other.body.rect.centery else -overlap.height
-                        body.vel.y *= -0.05
+                    body.vel.x *= 0.995
+
+                if abs(body.vel.x) < 2:
+                    body.vel.x = 0
 
         for caterpillar in self.caterpillars:
             if caterpillar.body.dynamic:
@@ -252,9 +307,9 @@ class Game:
             if block.side != target_side:
                 continue
             if proj.body.rect.colliderect(block.body.rect):
-                impact_speed = proj.body.vel.length()
-                block.apply_impact(impact_speed * 0.5)
-                block.body.vel += proj.body.vel * 0.12 / max(1.0, block.body.mass)
+                impact_momentum = proj.body.vel.length() * proj.body.mass
+                block.apply_impact(impact_momentum * 0.55)
+                block.body.vel += proj.body.vel * (0.2 * proj.body.mass / max(1.0, block.body.mass))
 
                 for nearby in self.blocks:
                     if nearby.side != target_side or nearby is block:
@@ -265,14 +320,14 @@ class Game:
                         nearby.apply_impact(splash)
                         nudge = nearby.body.center_vec() - hit_point
                         if nudge.length_squared() > 0:
-                            nearby.body.vel += nudge.normalize() * (splash * 0.14)
+                            nearby.body.vel += nudge.normalize() * (splash * 0.18)
                 proj.alive = False
                 return
 
         enemy = self.right_caterpillar if target_side == "right" else self.left_caterpillar
         if proj.body.rect.colliderect(enemy.body.rect):
             enemy.body.dynamic = True
-            enemy.body.vel += proj.body.vel * 0.4
+            enemy.body.vel += proj.body.vel * 0.65
             proj.alive = False
 
         if proj.body.rect.bottom >= GROUND_Y:
