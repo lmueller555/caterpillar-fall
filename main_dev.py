@@ -14,6 +14,10 @@ CANNON_MUZZLE_SPEED = 1480
 GROUND_Y = HEIGHT - 40
 CANNON_MIN_ANGLE_DEG = 25
 CANNON_MAX_ANGLE_DEG = 65
+BLOCK_DIRECT_IMPACT_BOOST = 0.95
+BLOCK_SPLASH_RADIUS = 100
+BLOCK_SPLASH_FORCE = 1.35
+BLOCK_SPLASH_NUDGE = 0.28
 
 SKY = (112, 196, 245)
 GROUND = (62, 132, 62)
@@ -186,19 +190,21 @@ class Game:
                 continue
             if proj.body.rect.colliderect(block.body.rect):
                 impact_momentum = proj.body.vel.length() * proj.body.mass
-                block.apply_impact(impact_momentum * 0.55)
-                block.body.vel += proj.body.vel * (0.2 * proj.body.mass / max(1.0, block.body.mass))
+                block.apply_impact(impact_momentum * 1.05)
+                block.body.vel += proj.body.vel * (
+                    BLOCK_DIRECT_IMPACT_BOOST * proj.body.mass / max(1.0, block.body.mass)
+                )
 
                 for nearby in self.blocks:
                     if nearby.side != target_side or nearby is block:
                         continue
                     distance = hit_point.distance_to(nearby.body.center_vec())
-                    if distance < 85:
-                        splash = max(0.0, (85 - distance) * 0.9)
+                    if distance < BLOCK_SPLASH_RADIUS:
+                        splash = max(0.0, (BLOCK_SPLASH_RADIUS - distance) * BLOCK_SPLASH_FORCE)
                         nearby.apply_impact(splash)
                         nudge = nearby.body.center_vec() - hit_point
                         if nudge.length_squared() > 0:
-                            nearby.body.vel += nudge.normalize() * (splash * 0.18)
+                            nearby.body.vel += nudge.normalize() * (splash * BLOCK_SPLASH_NUDGE)
                 proj.alive = False
                 return
 
