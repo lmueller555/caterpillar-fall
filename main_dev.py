@@ -181,8 +181,12 @@ class PhysicsEngine:
                 caterpillar.update(dt)
                 continue
             supporting = False
-            feet = caterpillar.body.rect.move(0, 1)
+            # Allow a small tolerance so caterpillars remain supported even if
+            # tiny gaps appear between their feet and the top block after impacts.
+            feet = caterpillar.body.rect.move(0, 4)
             for block in self.blocks:
+                if block.side != caterpillar.side:
+                    continue
                 if block.body.rect.colliderect(feet):
                     supporting = True
                     break
@@ -205,8 +209,8 @@ class Game:
 
         left_top = min(b.body.rect.top for b in self.left_blocks)
         right_top = min(b.body.rect.top for b in self.right_blocks)
-        self.left_caterpillar = Caterpillar(170, left_top - 28, "left")
-        self.right_caterpillar = Caterpillar(WIDTH - 220, right_top - 28, "right")
+        self.left_caterpillar = Caterpillar(170, left_top - 24, "left")
+        self.right_caterpillar = Caterpillar(WIDTH - 220, right_top - 24, "right")
         self.caterpillars = [self.left_caterpillar, self.right_caterpillar]
 
         self.left_cannon = Cannon("left", 90)
