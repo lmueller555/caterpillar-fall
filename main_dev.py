@@ -10,6 +10,7 @@ HEIGHT = 720
 FPS = 60
 GRAVITY = 900.0  # px/s^2
 FIRE_INTERVAL = 3.0
+CANNON_MUZZLE_SPEED = 780
 GROUND_Y = HEIGHT - 40
 
 SKY = (112, 196, 245)
@@ -114,10 +115,10 @@ class Cannon:
         angle = math.atan2(direction.y, direction.x)
         if self.side == "left":
             angle -= 0.35
-            speed = 390
+            speed = CANNON_MUZZLE_SPEED
         else:
             angle += 0.35
-            speed = 390
+            speed = CANNON_MUZZLE_SPEED
 
         vel = pygame.Vector2(math.cos(angle), math.sin(angle)) * speed
         if self.side == "right":
