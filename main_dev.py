@@ -201,6 +201,33 @@ class PhysicsEngine:
                     body.rect.y += -overlap.height if body.rect.centery < other.body.rect.centery else overlap.height
                 body.vel.y = 0
 
+    def _resolve_caterpillar_collisions(self, caterpillar: Caterpillar, move_x: float, move_y: float):
+        body = caterpillar.body
+        for block in self.blocks:
+            if not body.rect.colliderect(block.body.rect):
+                continue
+
+            overlap = body.rect.clip(block.body.rect)
+            if overlap.width <= 0 or overlap.height <= 0:
+                continue
+
+            if overlap.width < overlap.height:
+                if move_x > 0:
+                    body.rect.right = block.body.rect.left
+                elif move_x < 0:
+                    body.rect.left = block.body.rect.right
+                else:
+                    body.rect.x += -overlap.width if body.rect.centerx < block.body.rect.centerx else overlap.width
+                body.vel.x = 0
+            else:
+                if move_y > 0:
+                    body.rect.bottom = block.body.rect.top
+                elif move_y < 0:
+                    body.rect.top = block.body.rect.bottom
+                else:
+                    body.rect.y += -overlap.height if body.rect.centery < block.body.rect.centery else overlap.height
+                body.vel.y = 0
+
     def update(self, dt: float):
         for block in self.blocks:
             if not block.body.dynamic and not self._is_supported(block):
@@ -239,7 +266,23 @@ class PhysicsEngine:
 
         for caterpillar in self.caterpillars:
             if caterpillar.body.dynamic:
-                caterpillar.update(dt)
+                step_dt = dt / PHYSICS_SUBSTEPS
+                for _ in range(PHYSICS_SUBSTEPS):
+                    caterpillar.body.vel.y += GRAVITY * step_dt
+
+                    dx = caterpillar.body.vel.x * step_dt
+                    caterpillar.body.rect.x += int(round(dx))
+                    self._resolve_caterpillar_collisions(caterpillar, dx, 0)
+
+                    dy = caterpillar.body.vel.y * step_dt
+                    caterpillar.body.rect.y += int(round(dy))
+                    self._resolve_caterpillar_collisions(caterpillar, 0, dy)
+
+                    if caterpillar.body.rect.bottom >= GROUND_Y:
+                        caterpillar.body.rect.bottom = GROUND_Y
+                        caterpillar.body.vel.update(0, 0)
+                        caterpillar.fallen = True
+                        break
                 continue
             supporting = False
             # Allow a small tolerance so caterpillars remain supported even if
@@ -288,6 +331,7 @@ class Game:
     def _build_castle(self, side: str, start_x: int):
         block_w = 34
         block_h = 24
+        block_rect_h = block_h - 2
         rows = 8
         cols = 7
         blocks = []
@@ -296,8 +340,8 @@ class Game:
                 if row in (1, 4) and col in (0, cols - 1):
                     continue
                 x = start_x + col * block_w
-                y = GROUND_Y - (rows - row) * block_h
-                blocks.append(CastleBlock(pygame.Rect(x, y, block_w - 2, block_h - 2), side))
+                y = GROUND_Y - block_rect_h - (rows - 1 - row) * block_h
+                blocks.append(CastleBlock(pygame.Rect(x, y, block_w - 2, block_rect_h), side))
         return blocks
 
     def _projectile_hits(self, proj: Projectile):
