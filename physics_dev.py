@@ -38,12 +38,14 @@ class PhysicsEngine:
 
     def _is_supported(self, block: Any) -> bool:
         body = block.body
+        if not body.active:
+            return False
         if body.rect.bottom >= GROUND_Y:
             return True
 
         support_gap_px = 3
         for other in self.blocks:
-            if other is block:
+            if other is block or not other.body.active:
                 continue
             if self._horizontal_overlap(body.rect, other.body.rect) < 6:
                 continue
@@ -55,8 +57,10 @@ class PhysicsEngine:
 
     def _resolve_block_collisions(self, block: Any, move_x: float, move_y: float):
         body = block.body
+        if not body.active:
+            return
         for other in self.blocks:
-            if other is block or not body.rect.colliderect(other.body.rect):
+            if other is block or not other.body.active or not body.rect.colliderect(other.body.rect):
                 continue
 
             overlap = body.rect.clip(other.body.rect)
@@ -92,6 +96,8 @@ class PhysicsEngine:
     def _resolve_caterpillar_collisions(self, caterpillar: Any, move_x: float, move_y: float):
         body = caterpillar.body
         for block in self.blocks:
+            if not block.body.active:
+                continue
             if not body.rect.colliderect(block.body.rect):
                 continue
 
@@ -118,6 +124,8 @@ class PhysicsEngine:
 
     def update(self, dt: float):
         for block in self.blocks:
+            if not block.body.active:
+                continue
             if not block.body.dynamic and not self._is_supported(block):
                 block.body.dynamic = True
 
@@ -125,7 +133,7 @@ class PhysicsEngine:
         for _ in range(PHYSICS_SUBSTEPS):
             for block in self.blocks:
                 body = block.body
-                if not body.dynamic:
+                if not body.active or not body.dynamic:
                     continue
 
                 body.vel.y += GRAVITY * step_dt
@@ -176,6 +184,8 @@ class PhysicsEngine:
             supporting = False
             feet = caterpillar.body.rect.move(0, 4)
             for block in self.blocks:
+                if not block.body.active:
+                    continue
                 if block.side != caterpillar.side:
                     continue
                 if block.body.rect.colliderect(feet):

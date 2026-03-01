@@ -30,18 +30,55 @@ TEXT_COLOR = (25, 25, 25)
 
 
 class CastleBlock:
+    MAX_HITS = 3
+
     def __init__(self, rect: pygame.Rect, side: str):
         self.body = Body(rect=rect, vel=pygame.Vector2(), mass=3.0, dynamic=False)
         self.side = side
+        self.hit_count = 0
+        self.sprites = self._build_damage_sprites(rect.size)
+
+    @staticmethod
+    def _build_damage_sprites(size: tuple[int, int]) -> list[pygame.Surface]:
+        width, height = size
+        crack_color = (108, 108, 112)
+        edge_color = (98, 98, 100)
+
+        def make_base() -> pygame.Surface:
+            sprite = pygame.Surface((width, height), pygame.SRCALPHA)
+            sprite.fill(CASTLE_STONE)
+            pygame.draw.rect(sprite, edge_color, sprite.get_rect(), 1)
+            return sprite
+
+        pristine = make_base()
+
+        slight = make_base()
+        pygame.draw.line(slight, crack_color, (6, 6), (width - 7, height - 7), 2)
+        pygame.draw.line(slight, crack_color, (width // 2, 4), (width // 2 - 4, height // 2), 1)
+
+        major = make_base()
+        pygame.draw.line(major, crack_color, (5, 5), (width - 6, height - 6), 2)
+        pygame.draw.line(major, crack_color, (width - 6, 6), (6, height - 6), 2)
+        pygame.draw.line(major, crack_color, (width // 2, 3), (width // 2 - 8, height // 2), 2)
+        pygame.draw.line(major, crack_color, (width // 2 + 2, height // 2), (width - 8, height - 4), 1)
+
+        return [pristine, slight, major]
 
     def apply_impact(self, amount: float):
-        del amount
-        # Impacts dislodge blocks immediately; no permanent "broken" state.
+        if not self.body.active or amount <= 0:
+            return False
+
         self.body.dynamic = True
+        self.hit_count += 1
+        if self.hit_count >= self.MAX_HITS:
+            self.body.active = False
+            return True
+        return False
 
     @property
-    def color(self):
-        return CASTLE_STONE
+    def sprite(self):
+        damage_stage = min(self.hit_count, self.MAX_HITS - 1)
+        return self.sprites[damage_stage]
 
 
 class Caterpillar:
@@ -186,6 +223,8 @@ class Game:
 
         # Hit enemy blocks only; own shots pass through own castle by design.
         for block in self.blocks:
+            if not block.body.active:
+                continue
             if block.side != target_side:
                 continue
             if proj.body.rect.colliderect(block.body.rect):
@@ -196,6 +235,8 @@ class Game:
                 )
 
                 for nearby in self.blocks:
+                    if not nearby.body.active:
+                        continue
                     if nearby.side != target_side or nearby is block:
                         continue
                     distance = hit_point.distance_to(nearby.body.center_vec())
@@ -234,6 +275,7 @@ class Game:
             proj.update(dt)
             self._projectile_hits(proj)
         self.projectiles = [p for p in self.projectiles if p.alive]
+        self._despawn_destroyed_blocks()
 
         self.physics.update(dt)
 
@@ -242,13 +284,17 @@ class Game:
         elif self.right_caterpillar.fallen:
             self.winner = "Left"
 
+    def _despawn_destroyed_blocks(self):
+        self.blocks[:] = [block for block in self.blocks if block.body.active]
+        self.left_blocks[:] = [block for block in self.left_blocks if block.body.active]
+        self.right_blocks[:] = [block for block in self.right_blocks if block.body.active]
+
     def draw(self):
         self.screen.fill(SKY)
         pygame.draw.rect(self.screen, GROUND, (0, GROUND_Y, WIDTH, HEIGHT - GROUND_Y))
 
         for block in self.blocks:
-            pygame.draw.rect(self.screen, block.color, block.body.rect)
-            pygame.draw.rect(self.screen, (98, 98, 100), block.body.rect, 1)
+            self.screen.blit(block.sprite, block.body.rect.topleft)
 
         self.left_cannon.draw(self.screen)
         self.right_cannon.draw(self.screen)
