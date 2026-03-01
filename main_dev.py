@@ -19,7 +19,6 @@ CANNON_MAX_ANGLE_DEG = 65
 SKY = (112, 196, 245)
 GROUND = (62, 132, 62)
 CASTLE_STONE = (178, 180, 184)
-BROKEN_STONE = (130, 132, 136)
 CANNON_COLOR = (40, 40, 40)
 PROJECTILE_COLOR = (40, 20, 15)
 LEFT_COLOR = (65, 206, 110)
@@ -43,18 +42,14 @@ class CastleBlock:
     def __init__(self, rect: pygame.Rect, side: str):
         self.body = Body(rect=rect, vel=pygame.Vector2(), mass=3.0, dynamic=False)
         self.side = side
-        self.damage = 0.0
-        self.break_threshold = random.uniform(160.0, 240.0)
 
     def apply_impact(self, amount: float):
-        self.damage += amount
-        if self.damage > self.break_threshold:
-            self.body.dynamic = True
+        del amount
+        # Impacts dislodge blocks immediately; no permanent "broken" state.
+        self.body.dynamic = True
 
     @property
     def color(self):
-        if self.body.dynamic:
-            return BROKEN_STONE
         return CASTLE_STONE
 
 
