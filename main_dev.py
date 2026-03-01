@@ -1,17 +1,16 @@
 import math
 import random
-from dataclasses import dataclass
 
 import pygame
+
+from physics_dev import Body, GRAVITY, PhysicsEngine, set_ground_y
 
 
 WIDTH = 1280
 HEIGHT = 720
 FPS = 60
-GRAVITY = 900.0  # px/s^2
 FIRE_INTERVAL = 3.0
 CANNON_MUZZLE_SPEED = 1480
-PHYSICS_SUBSTEPS = 5
 GROUND_Y = HEIGHT - 40
 CANNON_MIN_ANGLE_DEG = 25
 CANNON_MAX_ANGLE_DEG = 65
@@ -24,18 +23,6 @@ PROJECTILE_COLOR = (40, 20, 15)
 LEFT_COLOR = (65, 206, 110)
 RIGHT_COLOR = (230, 135, 65)
 TEXT_COLOR = (25, 25, 25)
-
-
-@dataclass
-class Body:
-    rect: pygame.Rect
-    vel: pygame.Vector2
-    mass: float
-    dynamic: bool = True
-    active: bool = True
-
-    def center_vec(self) -> pygame.Vector2:
-        return pygame.Vector2(self.rect.centerx, self.rect.centery)
 
 
 class CastleBlock:
@@ -138,167 +125,6 @@ class Cannon:
         pygame.draw.line(surface, CANNON_COLOR, self.base, tip, 8)
 
 
-class PhysicsEngine:
-    def __init__(self, blocks: list[CastleBlock], caterpillars: list[Caterpillar]):
-        self.blocks = blocks
-        self.caterpillars = caterpillars
-
-    @staticmethod
-    def _horizontal_overlap(a: pygame.Rect, b: pygame.Rect) -> int:
-        return max(0, min(a.right, b.right) - max(a.left, b.left))
-
-    def _is_supported(self, block: CastleBlock) -> bool:
-        body = block.body
-        if body.rect.bottom >= GROUND_Y:
-            return True
-
-        # Castle rows are intentionally built with a tiny mortar gap between
-        # layers. Treat a block as supported when a block beneath it is within
-        # that gap and has enough horizontal overlap.
-        support_gap_px = 3
-        for other in self.blocks:
-            if other is block:
-                continue
-            if self._horizontal_overlap(body.rect, other.body.rect) < 6:
-                continue
-
-            vertical_gap = other.body.rect.top - body.rect.bottom
-            if 0 <= vertical_gap <= support_gap_px:
-                return True
-        return False
-
-    def _resolve_block_collisions(self, block: CastleBlock, move_x: float, move_y: float):
-        body = block.body
-        for other in self.blocks:
-            if other is block or not body.rect.colliderect(other.body.rect):
-                continue
-
-            overlap = body.rect.clip(other.body.rect)
-            if overlap.width <= 0 or overlap.height <= 0:
-                continue
-
-            if overlap.width < overlap.height:
-                if move_x > 0:
-                    body.rect.right = other.body.rect.left
-                elif move_x < 0:
-                    body.rect.left = other.body.rect.right
-                else:
-                    body.rect.x += -overlap.width if body.rect.centerx < other.body.rect.centerx else overlap.width
-                body.vel.x = 0
-            else:
-                if move_y > 0:
-                    body.rect.bottom = other.body.rect.top
-
-                    support_width = self._horizontal_overlap(body.rect, other.body.rect)
-                    support_ratio = support_width / max(1, body.rect.width)
-                    if support_ratio < 0.6:
-                        support_center = (max(body.rect.left, other.body.rect.left) + min(body.rect.right, other.body.rect.right)) * 0.5
-                        direction = 1 if support_center < body.rect.centerx else -1
-                        body.vel.x += direction * (220 * (0.6 - support_ratio))
-                elif move_y < 0:
-                    body.rect.top = other.body.rect.bottom
-                else:
-                    body.rect.y += -overlap.height if body.rect.centery < other.body.rect.centery else overlap.height
-                body.vel.y = 0
-
-    def _resolve_caterpillar_collisions(self, caterpillar: Caterpillar, move_x: float, move_y: float):
-        body = caterpillar.body
-        for block in self.blocks:
-            if not body.rect.colliderect(block.body.rect):
-                continue
-
-            overlap = body.rect.clip(block.body.rect)
-            if overlap.width <= 0 or overlap.height <= 0:
-                continue
-
-            if overlap.width < overlap.height:
-                if move_x > 0:
-                    body.rect.right = block.body.rect.left
-                elif move_x < 0:
-                    body.rect.left = block.body.rect.right
-                else:
-                    body.rect.x += -overlap.width if body.rect.centerx < block.body.rect.centerx else overlap.width
-                body.vel.x = 0
-            else:
-                if move_y > 0:
-                    body.rect.bottom = block.body.rect.top
-                elif move_y < 0:
-                    body.rect.top = block.body.rect.bottom
-                else:
-                    body.rect.y += -overlap.height if body.rect.centery < block.body.rect.centery else overlap.height
-                body.vel.y = 0
-
-    def update(self, dt: float):
-        for block in self.blocks:
-            if not block.body.dynamic and not self._is_supported(block):
-                block.body.dynamic = True
-
-        step_dt = dt / PHYSICS_SUBSTEPS
-        for _ in range(PHYSICS_SUBSTEPS):
-            for block in self.blocks:
-                body = block.body
-                if not body.dynamic:
-                    continue
-
-                body.vel.y += GRAVITY * step_dt
-
-                dx = body.vel.x * step_dt
-                body.rect.x += int(round(dx))
-                self._resolve_block_collisions(block, dx, 0)
-
-                dy = body.vel.y * step_dt
-                body.rect.y += int(round(dy))
-
-                if body.rect.bottom >= GROUND_Y:
-                    body.rect.bottom = GROUND_Y
-                    body.vel.y = 0
-                    body.vel.x *= 0.82
-
-                self._resolve_block_collisions(block, 0, dy)
-
-                if body.rect.bottom >= GROUND_Y - 1:
-                    body.vel.x *= 0.9
-                else:
-                    body.vel.x *= 0.995
-
-                if abs(body.vel.x) < 2:
-                    body.vel.x = 0
-
-        for caterpillar in self.caterpillars:
-            if caterpillar.body.dynamic:
-                step_dt = dt / PHYSICS_SUBSTEPS
-                for _ in range(PHYSICS_SUBSTEPS):
-                    caterpillar.body.vel.y += GRAVITY * step_dt
-
-                    dx = caterpillar.body.vel.x * step_dt
-                    caterpillar.body.rect.x += int(round(dx))
-                    self._resolve_caterpillar_collisions(caterpillar, dx, 0)
-
-                    dy = caterpillar.body.vel.y * step_dt
-                    caterpillar.body.rect.y += int(round(dy))
-                    self._resolve_caterpillar_collisions(caterpillar, 0, dy)
-
-                    if caterpillar.body.rect.bottom >= GROUND_Y:
-                        caterpillar.body.rect.bottom = GROUND_Y
-                        caterpillar.body.vel.update(0, 0)
-                        caterpillar.fallen = True
-                        break
-                continue
-            supporting = False
-            # Allow a small tolerance so caterpillars remain supported even if
-            # tiny gaps appear between their feet and the top block after impacts.
-            feet = caterpillar.body.rect.move(0, 4)
-            for block in self.blocks:
-                if block.side != caterpillar.side:
-                    continue
-                if block.body.rect.colliderect(feet):
-                    supporting = True
-                    break
-            if not supporting:
-                caterpillar.body.dynamic = True
-                caterpillar.body.vel = pygame.Vector2(random.uniform(-30, 30), -20)
-
-
 class Game:
     def __init__(self):
         pygame.init()
@@ -307,6 +133,7 @@ class Game:
         self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
         WIDTH, HEIGHT = self.screen.get_size()
         GROUND_Y = HEIGHT - 40
+        set_ground_y(GROUND_Y)
         pygame.display.set_caption("Caterpillar Fall")
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont("menlo", 24)
