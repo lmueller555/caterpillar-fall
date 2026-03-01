@@ -156,13 +156,20 @@ class PhysicsEngine:
         body = block.body
         if body.rect.bottom >= GROUND_Y:
             return True
-        probe = body.rect.move(0, 2)
+
+        # Castle rows are intentionally built with a tiny mortar gap between
+        # layers. Treat a block as supported when a block beneath it is within
+        # that gap and has enough horizontal overlap.
+        support_gap_px = 3
         for other in self.blocks:
             if other is block:
                 continue
-            if probe.colliderect(other.body.rect):
-                if self._horizontal_overlap(body.rect, other.body.rect) >= 6:
-                    return True
+            if self._horizontal_overlap(body.rect, other.body.rect) < 6:
+                continue
+
+            vertical_gap = other.body.rect.top - body.rect.bottom
+            if 0 <= vertical_gap <= support_gap_px:
+                return True
         return False
 
     def _resolve_block_collisions(self, block: CastleBlock, move_x: float, move_y: float):
