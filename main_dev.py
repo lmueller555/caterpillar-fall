@@ -12,6 +12,8 @@ GRAVITY = 900.0  # px/s^2
 FIRE_INTERVAL = 3.0
 CANNON_MUZZLE_SPEED = 1280
 GROUND_Y = HEIGHT - 40
+CANNON_MIN_ANGLE_DEG = 25
+CANNON_MAX_ANGLE_DEG = 65
 
 SKY = (112, 196, 245)
 GROUND = (62, 132, 62)
@@ -104,6 +106,7 @@ class Cannon:
         self.side = side
         self.base = pygame.Vector2(base_x, GROUND_Y - 80)
         self.cooldown = random.uniform(0.0, FIRE_INTERVAL)
+        self.barrel_angle = -math.radians((CANNON_MIN_ANGLE_DEG + CANNON_MAX_ANGLE_DEG) / 2)
 
     def update_and_maybe_fire(self, dt: float, target: pygame.Vector2):
         self.cooldown -= dt
@@ -111,14 +114,15 @@ class Cannon:
             return None
         self.cooldown = FIRE_INTERVAL
 
-        direction = target - self.base
-        angle = math.atan2(direction.y, direction.x)
+        del target
+        launch_deg = random.uniform(CANNON_MIN_ANGLE_DEG, CANNON_MAX_ANGLE_DEG)
         if self.side == "left":
-            angle -= 0.35
+            angle = -math.radians(launch_deg)
             speed = CANNON_MUZZLE_SPEED
         else:
-            angle += 0.35
+            angle = math.pi + math.radians(launch_deg)
             speed = CANNON_MUZZLE_SPEED
+        self.barrel_angle = angle
 
         vel = pygame.Vector2(math.cos(angle), math.sin(angle)) * speed
         if self.side == "right":
@@ -131,10 +135,9 @@ class Cannon:
         base_rect = pygame.Rect(self.base.x - 18, self.base.y - 12, 36, 24)
         pygame.draw.rect(surface, CANNON_COLOR, base_rect)
         barrel_length = 34
-        barrel_angle = -0.5 if self.side == "left" else math.pi + 0.5
         tip = (
-            int(self.base.x + math.cos(barrel_angle) * barrel_length),
-            int(self.base.y + math.sin(barrel_angle) * barrel_length),
+            int(self.base.x + math.cos(self.barrel_angle) * barrel_length),
+            int(self.base.y + math.sin(self.barrel_angle) * barrel_length),
         )
         pygame.draw.line(surface, CANNON_COLOR, self.base, tip, 8)
 
