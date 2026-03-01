@@ -10,6 +10,7 @@ WIDTH = 1280
 HEIGHT = 720
 FPS = 60
 FIRE_INTERVAL = 3.0
+FORTIFY_INTERVAL = 30.0
 CANNON_MUZZLE_SPEED = 1480
 GROUND_Y = HEIGHT - 40
 CANNON_MIN_ANGLE_DEG = 25
@@ -200,6 +201,7 @@ class Game:
         self.projectiles: list[Projectile] = []
         self.physics = PhysicsEngine(self.blocks, self.caterpillars)
         self.winner = None
+        self.fortify_timer = FORTIFY_INTERVAL
 
     def _build_castle(self, side: str, start_x: int):
         block_w = 34
@@ -279,6 +281,11 @@ class Game:
 
         self.physics.update(dt)
 
+        self.fortify_timer -= dt
+        while self.fortify_timer <= 0:
+            self._fortify_castles()
+            self.fortify_timer += FORTIFY_INTERVAL
+
         if self.left_caterpillar.fallen:
             self.winner = "Right"
         elif self.right_caterpillar.fallen:
@@ -288,6 +295,32 @@ class Game:
         self.blocks[:] = [block for block in self.blocks if block.body.active]
         self.left_blocks[:] = [block for block in self.left_blocks if block.body.active]
         self.right_blocks[:] = [block for block in self.right_blocks if block.body.active]
+
+    def _fortify_castle(self, blocks: list[CastleBlock], side: str):
+        if not blocks:
+            return
+
+        block_h = max(block.body.rect.height for block in blocks) + 2
+        block_w = max(block.body.rect.width for block in blocks) + 2
+        min_x = min(block.body.rect.left for block in blocks)
+        max_x = max(block.body.rect.left for block in blocks)
+
+        for block in blocks:
+            block.body.rect.y -= block_h
+
+        cols = ((max_x - min_x) // block_w) + 1
+        new_blocks = []
+        for col in range(cols):
+            x = min_x + col * block_w
+            y = GROUND_Y - (block_h - 2)
+            new_blocks.append(CastleBlock(pygame.Rect(x, y, block_w - 2, block_h - 2), side))
+
+        blocks.extend(new_blocks)
+        self.blocks.extend(new_blocks)
+
+    def _fortify_castles(self):
+        self._fortify_castle(self.left_blocks, "left")
+        self._fortify_castle(self.right_blocks, "right")
 
     def draw(self):
         self.screen.fill(SKY)
@@ -305,7 +338,7 @@ class Game:
         self.left_caterpillar.draw(self.screen)
         self.right_caterpillar.draw(self.screen)
 
-        caption = "Caterpillar Fall · Cannons auto-fire every 3 seconds"
+        caption = "Caterpillar Fall · Cannons auto-fire every 3s · Castles fortify every 30s"
         self.screen.blit(self.font.render(caption, True, TEXT_COLOR), (24, 16))
         if self.winner:
             msg = f"{self.winner} side wins!"
