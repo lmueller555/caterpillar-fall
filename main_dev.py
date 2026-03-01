@@ -311,8 +311,13 @@ class Game:
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont("menlo", 24)
 
+        self.castle_rows = 12
+        self.castle_cols = 11
+
         self.left_blocks = self._build_castle("left", 120)
-        self.right_blocks = self._build_castle("right", WIDTH - 120 - 7 * 34)
+        self.right_blocks = self._build_castle(
+            "right", WIDTH - 120 - self.castle_cols * 34
+        )
         self.blocks = self.left_blocks + self.right_blocks
 
         left_top = min(b.body.rect.top for b in self.left_blocks)
@@ -332,12 +337,12 @@ class Game:
         block_w = 34
         block_h = 24
         block_rect_h = block_h - 2
-        rows = 8
-        cols = 7
+        rows = self.castle_rows
+        cols = self.castle_cols
         blocks = []
         for row in range(rows):
             for col in range(cols):
-                if row in (1, 4) and col in (0, cols - 1):
+                if row in (1, 4, 7) and col in (0, cols - 1):
                     continue
                 x = start_x + col * block_w
                 y = GROUND_Y - block_rect_h - (rows - 1 - row) * block_h
