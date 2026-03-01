@@ -202,7 +202,11 @@ class PhysicsEngine:
 class Game:
     def __init__(self):
         pygame.init()
-        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        global WIDTH, HEIGHT, GROUND_Y
+
+        self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+        WIDTH, HEIGHT = self.screen.get_size()
+        GROUND_Y = HEIGHT - 40
         pygame.display.set_caption("Caterpillar Fall")
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont("menlo", 24)
