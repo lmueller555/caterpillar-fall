@@ -12,6 +12,12 @@ FPS = 60
 FIRE_INTERVAL = 3.0
 FORTIFY_INTERVAL = 30.0
 CANNON_MUZZLE_SPEED = 1480
+GATLING_BURST_INTERVAL = 60.0
+GATLING_BURST_COUNT = 20
+GATLING_SHOT_INTERVAL = 0.085
+GATLING_MUZZLE_SPEED = 1320
+GATLING_MIN_ANGLE_DEG = 20
+GATLING_MAX_ANGLE_DEG = 45
 GROUND_Y = HEIGHT - 40
 CANNON_MIN_ANGLE_DEG = 25
 CANNON_MAX_ANGLE_DEG = 65
@@ -25,6 +31,7 @@ GROUND = (62, 132, 62)
 CASTLE_STONE = (178, 180, 184)
 CANNON_COLOR = (40, 40, 40)
 PROJECTILE_COLOR = (40, 20, 15)
+GATLING_COLOR = (64, 64, 64)
 LEFT_COLOR = (65, 206, 110)
 RIGHT_COLOR = (230, 135, 65)
 TEXT_COLOR = (25, 25, 25)
@@ -167,6 +174,68 @@ class Cannon:
         pygame.draw.line(surface, CANNON_COLOR, self.base, tip, 8)
 
 
+class GatlingGun:
+    def __init__(self, side: str, base_x: int):
+        self.side = side
+        self.base = pygame.Vector2(base_x, int(HEIGHT * 0.5))
+        self.burst_timer = random.uniform(0.0, GATLING_BURST_INTERVAL)
+        self.burst_remaining = 0
+        self.shot_timer = 0.0
+        self.swing_direction = 1.0
+        self.barrel_angle_deg = GATLING_MIN_ANGLE_DEG
+
+    def _signed_angle_rad(self):
+        if self.side == "left":
+            return math.radians(self.barrel_angle_deg)
+        return math.pi - math.radians(self.barrel_angle_deg)
+
+    def update_and_maybe_fire(self, dt: float):
+        shots = []
+
+        swing_speed = 40.0
+        self.barrel_angle_deg += self.swing_direction * swing_speed * dt
+        if self.barrel_angle_deg >= GATLING_MAX_ANGLE_DEG:
+            self.barrel_angle_deg = GATLING_MAX_ANGLE_DEG
+            self.swing_direction = -1.0
+        elif self.barrel_angle_deg <= GATLING_MIN_ANGLE_DEG:
+            self.barrel_angle_deg = GATLING_MIN_ANGLE_DEG
+            self.swing_direction = 1.0
+
+        self.burst_timer -= dt
+        if self.burst_remaining <= 0 and self.burst_timer <= 0:
+            self.burst_remaining = GATLING_BURST_COUNT
+            self.burst_timer += GATLING_BURST_INTERVAL
+            self.shot_timer = 0.0
+
+        if self.burst_remaining <= 0:
+            return shots
+
+        self.shot_timer -= dt
+        while self.burst_remaining > 0 and self.shot_timer <= 0:
+            self.shot_timer += GATLING_SHOT_INTERVAL
+            angle = self._signed_angle_rad()
+            vel = pygame.Vector2(math.cos(angle), math.sin(angle)) * GATLING_MUZZLE_SPEED
+            if self.side == "right":
+                vel.x = -abs(vel.x)
+            else:
+                vel.x = abs(vel.x)
+            shots.append(Projectile(self.base.copy(), vel, self.side))
+            self.burst_remaining -= 1
+
+        return shots
+
+    def draw(self, surface: pygame.Surface):
+        base_rect = pygame.Rect(self.base.x - 14, self.base.y - 14, 28, 28)
+        pygame.draw.rect(surface, GATLING_COLOR, base_rect)
+        angle = self._signed_angle_rad()
+        barrel_length = 30
+        tip = (
+            int(self.base.x + math.cos(angle) * barrel_length),
+            int(self.base.y + math.sin(angle) * barrel_length),
+        )
+        pygame.draw.line(surface, GATLING_COLOR, self.base, tip, 6)
+
+
 class Game:
     def __init__(self):
         pygame.init()
@@ -197,6 +266,8 @@ class Game:
 
         self.left_cannon = Cannon("left", 90)
         self.right_cannon = Cannon("right", WIDTH - 90)
+        self.left_gatling = GatlingGun("left", 90)
+        self.right_gatling = GatlingGun("right", WIDTH - 90)
 
         self.projectiles: list[Projectile] = []
         self.physics = PhysicsEngine(self.blocks, self.caterpillars)
@@ -267,6 +338,9 @@ class Game:
         if right_shot:
             self.projectiles.append(right_shot)
 
+        self.projectiles.extend(self.left_gatling.update_and_maybe_fire(dt))
+        self.projectiles.extend(self.right_gatling.update_and_maybe_fire(dt))
+
         for proj in self.projectiles:
             proj.update(dt)
             self._projectile_hits(proj)
@@ -325,6 +399,8 @@ class Game:
 
         self.left_cannon.draw(self.screen)
         self.right_cannon.draw(self.screen)
+        self.left_gatling.draw(self.screen)
+        self.right_gatling.draw(self.screen)
 
         for proj in self.projectiles:
             pygame.draw.circle(self.screen, PROJECTILE_COLOR, proj.body.rect.center, 5)
@@ -332,7 +408,10 @@ class Game:
         self.left_caterpillar.draw(self.screen)
         self.right_caterpillar.draw(self.screen)
 
-        caption = "Caterpillar Fall · Cannons auto-fire every 3s · Castles fortify every 30s"
+        caption = (
+            "Caterpillar Fall · Cannons auto-fire every 3s · "
+            "Gatlings burst 20 shots every 60s · Castles fortify every 30s"
+        )
         self.screen.blit(self.font.render(caption, True, TEXT_COLOR), (24, 16))
         if self.winner:
             msg = f"{self.winner} side wins!"
