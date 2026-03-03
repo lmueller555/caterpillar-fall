@@ -178,7 +178,8 @@ class GatlingGun:
     def __init__(self, side: str, base_x: int):
         self.side = side
         self.base = pygame.Vector2(base_x, int(HEIGHT * 0.5))
-        self.burst_timer = random.uniform(0.0, GATLING_BURST_INTERVAL)
+        # Keep both sides synchronized so each gatling starts a burst every 60 seconds.
+        self.burst_timer = GATLING_BURST_INTERVAL
         self.burst_remaining = 0
         self.shot_timer = 0.0
         self.swing_direction = 1.0
