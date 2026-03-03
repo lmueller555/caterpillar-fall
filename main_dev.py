@@ -250,12 +250,12 @@ class Game:
         self.font = pygame.font.SysFont("menlo", 24)
 
         self.castle_rows = 12
-        self.castle_cols = 11
+        self.castle_cols = 12
+        self.left_castle_start_x = 120
+        self.right_castle_start_x = WIDTH - 120 - self.castle_cols * 34
 
-        self.left_blocks = self._build_castle("left", 120)
-        self.right_blocks = self._build_castle(
-            "right", WIDTH - 120 - self.castle_cols * 34
-        )
+        self.left_blocks = self._build_castle("left", self.left_castle_start_x)
+        self.right_blocks = self._build_castle("right", self.right_castle_start_x)
         self.blocks = self.left_blocks + self.right_blocks
 
         left_top = min(b.body.rect.top for b in self.left_blocks)
@@ -370,13 +370,19 @@ class Game:
 
         block_h = max(block.body.rect.height for block in blocks) + 2
         block_w = max(block.body.rect.width for block in blocks) + 2
-        min_x = min(block.body.rect.left for block in blocks)
-        max_x = max(block.body.rect.left for block in blocks)
 
         for block in blocks:
             block.body.rect.y -= block_h
 
-        cols = ((max_x - min_x) // block_w) + 1
+        for caterpillar in self.caterpillars:
+            if caterpillar.side == side and not caterpillar.fallen:
+                caterpillar.body.rect.y -= block_h
+
+        cols = self.castle_cols
+        if side == "left":
+            min_x = self.left_castle_start_x
+        else:
+            min_x = self.right_castle_start_x
         new_blocks = []
         for col in range(cols):
             x = min_x + col * block_w
