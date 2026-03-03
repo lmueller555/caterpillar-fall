@@ -251,12 +251,6 @@ class Game:
                 proj.alive = False
                 return
 
-        enemy = self.right_caterpillar if target_side == "right" else self.left_caterpillar
-        if proj.body.rect.colliderect(enemy.body.rect):
-            enemy.body.dynamic = True
-            enemy.body.vel += proj.body.vel * 0.65
-            proj.alive = False
-
         if proj.body.rect.bottom >= GROUND_Y:
             proj.alive = False
 
