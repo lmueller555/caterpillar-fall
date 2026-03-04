@@ -274,6 +274,7 @@ class Game:
         self.physics = PhysicsEngine(self.blocks, self.caterpillars)
         self.winner = None
         self.fortify_timer = FORTIFY_INTERVAL
+        self.paused = False
 
     def _build_castle(self, side: str, start_x: int):
         block_w = 34
@@ -420,10 +421,15 @@ class Game:
             "Gatlings burst 20 shots every 60s · Castles fortify every 30s"
         )
         self.screen.blit(self.font.render(caption, True, TEXT_COLOR), (24, 16))
+        pause_hint = "Press P to pause/resume"
+        self.screen.blit(self.font.render(pause_hint, True, TEXT_COLOR), (24, 46))
+        if self.paused:
+            paused_text = self.font.render("Paused", True, (180, 30, 30))
+            self.screen.blit(paused_text, (WIDTH // 2 - paused_text.get_width() // 2, 76))
         if self.winner:
             msg = f"{self.winner} side wins!"
             text = self.font.render(msg, True, (180, 30, 30))
-            self.screen.blit(text, (WIDTH // 2 - text.get_width() // 2, 46))
+            self.screen.blit(text, (WIDTH // 2 - text.get_width() // 2, 106))
 
         pygame.display.flip()
 
@@ -436,8 +442,11 @@ class Game:
                     running = False
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                     running = False
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_p:
+                    self.paused = not self.paused
 
-            self.update(dt)
+            if not self.paused:
+                self.update(dt)
             self.draw()
 
         pygame.quit()
