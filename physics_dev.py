@@ -8,11 +8,17 @@ import pygame
 GRAVITY = 900.0  # px/s^2
 PHYSICS_SUBSTEPS = 5
 GROUND_Y = 680
+SCREEN_WIDTH = 1280
 
 
 def set_ground_y(y: int) -> None:
     global GROUND_Y
     GROUND_Y = y
+
+
+def set_screen_width(width: int) -> None:
+    global SCREEN_WIDTH
+    SCREEN_WIDTH = width
 
 
 @dataclass
@@ -141,6 +147,12 @@ class PhysicsEngine:
                 dx = body.vel.x * step_dt
                 body.rect.x += int(round(dx))
                 self._resolve_block_collisions(block, dx, 0)
+                if body.rect.left < 0:
+                    body.rect.left = 0
+                    body.vel.x = 0
+                elif body.rect.right > SCREEN_WIDTH:
+                    body.rect.right = SCREEN_WIDTH
+                    body.vel.x = 0
 
                 dy = body.vel.y * step_dt
                 body.rect.y += int(round(dy))
@@ -169,6 +181,12 @@ class PhysicsEngine:
                     dx = caterpillar.body.vel.x * step_dt
                     caterpillar.body.rect.x += int(round(dx))
                     self._resolve_caterpillar_collisions(caterpillar, dx, 0)
+                    if caterpillar.body.rect.left < 0:
+                        caterpillar.body.rect.left = 0
+                        caterpillar.body.vel.x = 0
+                    elif caterpillar.body.rect.right > SCREEN_WIDTH:
+                        caterpillar.body.rect.right = SCREEN_WIDTH
+                        caterpillar.body.vel.x = 0
 
                     dy = caterpillar.body.vel.y * step_dt
                     caterpillar.body.rect.y += int(round(dy))

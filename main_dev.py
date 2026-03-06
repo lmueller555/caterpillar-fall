@@ -2,7 +2,7 @@ import math
 
 import pygame
 
-from physics_dev import Body, GRAVITY, PhysicsEngine, set_ground_y
+from physics_dev import Body, GRAVITY, PhysicsEngine, set_ground_y, set_screen_width
 
 
 WIDTH = 1280
@@ -201,6 +201,7 @@ class Game:
         WIDTH, HEIGHT = self.screen.get_size()
         GROUND_Y = HEIGHT - 40
         set_ground_y(GROUND_Y)
+        set_screen_width(WIDTH)
         pygame.display.set_caption("Caterpillar Fall")
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont("menlo", 24)
@@ -224,6 +225,28 @@ class Game:
         self.right_cannon = Cannon("right", WIDTH - 90)
 
         self.projectiles: list[Projectile] = []
+        self.physics = PhysicsEngine(self.blocks, self.caterpillars)
+        self.winner = None
+        self.fortify_timer = FORTIFY_INTERVAL
+        self.paused = False
+        self.current_turn = "left"
+        self.turn_timer = TURN_TIME_LIMIT
+
+    def reset_game(self):
+        self.left_blocks = self._build_castle("left", self.left_castle_start_x)
+        self.right_blocks = self._build_castle("right", self.right_castle_start_x)
+        self.blocks = self.left_blocks + self.right_blocks
+
+        left_top = min(b.body.rect.top for b in self.left_blocks)
+        right_top = min(b.body.rect.top for b in self.right_blocks)
+        self.left_caterpillar = Caterpillar(170, left_top - 24, "left")
+        self.right_caterpillar = Caterpillar(WIDTH - 220, right_top - 24, "right")
+        self.caterpillars = [self.left_caterpillar, self.right_caterpillar]
+
+        self.left_cannon = Cannon("left", 90)
+        self.right_cannon = Cannon("right", WIDTH - 90)
+
+        self.projectiles = []
         self.physics = PhysicsEngine(self.blocks, self.caterpillars)
         self.winner = None
         self.fortify_timer = FORTIFY_INTERVAL
@@ -391,7 +414,7 @@ class Game:
 
         caption = "Caterpillar Fall · Turn-based artillery · One shot per turn · Castles fortify every 30s"
         self.screen.blit(self.font.render(caption, True, TEXT_COLOR), (24, 16))
-        pause_hint = "Controls: Up/Down aim, Left/Right power, Space fire, P pause"
+        pause_hint = "Controls: Up/Down aim, Left/Right power, Space fire, P pause, R restart"
         self.screen.blit(self.font.render(pause_hint, True, TEXT_COLOR), (24, 46))
         turn_text = f"Turn: {self.current_turn.title()}  |  Time left: {max(0.0, self.turn_timer):04.1f}s"
         self.screen.blit(self.font.render(turn_text, True, TEXT_COLOR), (24, 76))
@@ -422,6 +445,8 @@ class Game:
                     self.paused = not self.paused
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
                     self.fire_active_cannon()
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_r and self.winner:
+                    self.reset_game()
 
             if not self.paused:
                 keys = pygame.key.get_pressed()
