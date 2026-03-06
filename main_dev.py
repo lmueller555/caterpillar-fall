@@ -38,7 +38,8 @@ TEXT_COLOR = (25, 25, 25)
 
 
 class CastleBlock:
-    MAX_HITS = 3
+    MAX_HITS = 12
+    HITS_PER_DAMAGE_STAGE = 4
 
     def __init__(self, rect: pygame.Rect, side: str):
         self.body = Body(rect=rect, vel=pygame.Vector2(), mass=3.0, dynamic=False)
@@ -85,7 +86,7 @@ class CastleBlock:
 
     @property
     def sprite(self):
-        damage_stage = min(self.hit_count, self.MAX_HITS - 1)
+        damage_stage = min(self.hit_count // self.HITS_PER_DAMAGE_STAGE, len(self.sprites) - 1)
         return self.sprites[damage_stage]
 
 
