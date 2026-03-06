@@ -1,5 +1,4 @@
 import math
-import random
 
 import pygame
 
@@ -9,15 +8,13 @@ from physics_dev import Body, GRAVITY, PhysicsEngine, set_ground_y
 WIDTH = 1280
 HEIGHT = 720
 FPS = 60
-FIRE_INTERVAL = 3.0
 FORTIFY_INTERVAL = 30.0
 CANNON_MUZZLE_SPEED = 1530
-GATLING_BURST_INTERVAL = 6.0
-GATLING_BURST_COUNT = 200
-GATLING_SHOT_INTERVAL = 0.085
-GATLING_MUZZLE_SPEED = 1520
-GATLING_MIN_ANGLE_DEG = -20
-GATLING_MAX_ANGLE_DEG = 5
+CANNON_MIN_SPEED = 900
+CANNON_MAX_SPEED = 1800
+TURN_TIME_LIMIT = 30.0
+TRACER_STEP_TIME = 0.12
+TRACER_STEPS = 35
 GROUND_Y = HEIGHT - 40
 CANNON_MIN_ANGLE_DEG = 25
 CANNON_MAX_ANGLE_DEG = 65
@@ -31,7 +28,6 @@ GROUND = (62, 132, 62)
 CASTLE_STONE = (178, 180, 184)
 CANNON_COLOR = (40, 40, 40)
 PROJECTILE_COLOR = (40, 20, 15)
-GATLING_COLOR = (64, 64, 64)
 LEFT_COLOR = (65, 206, 110)
 RIGHT_COLOR = (230, 135, 65)
 TEXT_COLOR = (25, 25, 25)
@@ -138,24 +134,26 @@ class Cannon:
     def __init__(self, side: str, base_x: int):
         self.side = side
         self.base = pygame.Vector2(base_x, GROUND_Y - 80)
-        self.cooldown = random.uniform(0.0, FIRE_INTERVAL)
-        self.barrel_angle = -math.radians((CANNON_MIN_ANGLE_DEG + CANNON_MAX_ANGLE_DEG) / 2)
+        self.aim_angle_deg = (CANNON_MIN_ANGLE_DEG + CANNON_MAX_ANGLE_DEG) / 2
+        self.muzzle_speed = float(CANNON_MUZZLE_SPEED)
 
-    def update_and_maybe_fire(self, dt: float, target: pygame.Vector2):
-        self.cooldown -= dt
-        if self.cooldown > 0:
-            return None
-        self.cooldown = FIRE_INTERVAL
-
-        del target
-        launch_deg = random.uniform(CANNON_MIN_ANGLE_DEG, CANNON_MAX_ANGLE_DEG)
+    def _launch_angle_rad(self) -> float:
+        launch_deg = self.aim_angle_deg
         if self.side == "left":
             angle = -math.radians(launch_deg)
-            speed = CANNON_MUZZLE_SPEED
         else:
             angle = math.pi + math.radians(launch_deg)
-            speed = CANNON_MUZZLE_SPEED
-        self.barrel_angle = angle
+        return angle
+
+    def adjust_aim(self, delta_deg: float):
+        self.aim_angle_deg = max(CANNON_MIN_ANGLE_DEG, min(CANNON_MAX_ANGLE_DEG, self.aim_angle_deg + delta_deg))
+
+    def adjust_speed(self, delta: float):
+        self.muzzle_speed = max(CANNON_MIN_SPEED, min(CANNON_MAX_SPEED, self.muzzle_speed + delta))
+
+    def fire(self):
+        angle = self._launch_angle_rad()
+        speed = self.muzzle_speed
 
         vel = pygame.Vector2(math.cos(angle), math.sin(angle)) * speed
         if self.side == "right":
@@ -164,78 +162,34 @@ class Cannon:
             vel.x = abs(vel.x)
         return Projectile(self.base.copy(), vel, self.side)
 
+    def tracer_points(self) -> list[tuple[int, int]]:
+        angle = self._launch_angle_rad()
+        velocity = pygame.Vector2(math.cos(angle), math.sin(angle)) * self.muzzle_speed
+        if self.side == "right":
+            velocity.x = -abs(velocity.x)
+        else:
+            velocity.x = abs(velocity.x)
+
+        points: list[tuple[int, int]] = []
+        for i in range(1, TRACER_STEPS + 1):
+            t = i * TRACER_STEP_TIME
+            x = self.base.x + velocity.x * t
+            y = self.base.y + velocity.y * t + 0.5 * GRAVITY * t * t
+            if x < 0 or x > WIDTH or y > HEIGHT:
+                break
+            points.append((int(x), int(y)))
+        return points
+
     def draw(self, surface: pygame.Surface):
         base_rect = pygame.Rect(self.base.x - 18, self.base.y - 12, 36, 24)
         pygame.draw.rect(surface, CANNON_COLOR, base_rect)
         barrel_length = 34
+        barrel_angle = self._launch_angle_rad()
         tip = (
-            int(self.base.x + math.cos(self.barrel_angle) * barrel_length),
-            int(self.base.y + math.sin(self.barrel_angle) * barrel_length),
+            int(self.base.x + math.cos(barrel_angle) * barrel_length),
+            int(self.base.y + math.sin(barrel_angle) * barrel_length),
         )
         pygame.draw.line(surface, CANNON_COLOR, self.base, tip, 8)
-
-
-class GatlingGun:
-    def __init__(self, side: str, base_x: int):
-        self.side = side
-        self.base = pygame.Vector2(base_x, int(HEIGHT * 0.5))
-        # Keep both sides synchronized so each gatling starts a burst every 60 seconds.
-        self.burst_timer = GATLING_BURST_INTERVAL
-        self.burst_remaining = 0
-        self.shot_timer = 0.0
-        self.swing_direction = 1.0
-        self.barrel_angle_deg = GATLING_MIN_ANGLE_DEG
-
-    def _signed_angle_rad(self):
-        if self.side == "left":
-            return math.radians(self.barrel_angle_deg)
-        return math.pi - math.radians(self.barrel_angle_deg)
-
-    def update_and_maybe_fire(self, dt: float):
-        shots = []
-
-        swing_speed = 40.0
-        self.barrel_angle_deg += self.swing_direction * swing_speed * dt
-        if self.barrel_angle_deg >= GATLING_MAX_ANGLE_DEG:
-            self.barrel_angle_deg = GATLING_MAX_ANGLE_DEG
-            self.swing_direction = -1.0
-        elif self.barrel_angle_deg <= GATLING_MIN_ANGLE_DEG:
-            self.barrel_angle_deg = GATLING_MIN_ANGLE_DEG
-            self.swing_direction = 1.0
-
-        self.burst_timer -= dt
-        if self.burst_remaining <= 0 and self.burst_timer <= 0:
-            self.burst_remaining = GATLING_BURST_COUNT
-            self.burst_timer += GATLING_BURST_INTERVAL
-            self.shot_timer = 0.0
-
-        if self.burst_remaining <= 0:
-            return shots
-
-        self.shot_timer -= dt
-        while self.burst_remaining > 0 and self.shot_timer <= 0:
-            self.shot_timer += GATLING_SHOT_INTERVAL
-            angle = self._signed_angle_rad()
-            vel = pygame.Vector2(math.cos(angle), math.sin(angle)) * GATLING_MUZZLE_SPEED
-            if self.side == "right":
-                vel.x = -abs(vel.x)
-            else:
-                vel.x = abs(vel.x)
-            shots.append(Projectile(self.base.copy(), vel, self.side))
-            self.burst_remaining -= 1
-
-        return shots
-
-    def draw(self, surface: pygame.Surface):
-        base_rect = pygame.Rect(self.base.x - 14, self.base.y - 14, 28, 28)
-        pygame.draw.rect(surface, GATLING_COLOR, base_rect)
-        angle = self._signed_angle_rad()
-        barrel_length = 30
-        tip = (
-            int(self.base.x + math.cos(angle) * barrel_length),
-            int(self.base.y + math.sin(angle) * barrel_length),
-        )
-        pygame.draw.line(surface, GATLING_COLOR, self.base, tip, 6)
 
 
 class Game:
@@ -268,14 +222,14 @@ class Game:
 
         self.left_cannon = Cannon("left", 90)
         self.right_cannon = Cannon("right", WIDTH - 90)
-        self.left_gatling = GatlingGun("left", 90)
-        self.right_gatling = GatlingGun("right", WIDTH - 90)
 
         self.projectiles: list[Projectile] = []
         self.physics = PhysicsEngine(self.blocks, self.caterpillars)
         self.winner = None
         self.fortify_timer = FORTIFY_INTERVAL
         self.paused = False
+        self.current_turn = "left"
+        self.turn_timer = TURN_TIME_LIMIT
 
     def _build_castle(self, side: str, start_x: int):
         block_w = 34
@@ -332,17 +286,9 @@ class Game:
         if self.winner:
             return
 
-        left_target = pygame.Vector2(self.right_caterpillar.body.rect.center)
-        right_target = pygame.Vector2(self.left_caterpillar.body.rect.center)
-        left_shot = self.left_cannon.update_and_maybe_fire(dt, left_target)
-        right_shot = self.right_cannon.update_and_maybe_fire(dt, right_target)
-        if left_shot:
-            self.projectiles.append(left_shot)
-        if right_shot:
-            self.projectiles.append(right_shot)
-
-        self.projectiles.extend(self.left_gatling.update_and_maybe_fire(dt))
-        self.projectiles.extend(self.right_gatling.update_and_maybe_fire(dt))
+        self.turn_timer -= dt
+        if self.turn_timer <= 0:
+            self._advance_turn()
 
         for proj in self.projectiles:
             proj.update(dt)
@@ -361,6 +307,28 @@ class Game:
             self.winner = "Right"
         elif self.right_caterpillar.fallen:
             self.winner = "Left"
+
+    def _active_cannon(self) -> Cannon:
+        if self.current_turn == "left":
+            return self.left_cannon
+        return self.right_cannon
+
+    def _advance_turn(self):
+        self.current_turn = "right" if self.current_turn == "left" else "left"
+        self.turn_timer = TURN_TIME_LIMIT
+
+    def adjust_active_cannon(self, aim_delta: float = 0.0, speed_delta: float = 0.0):
+        cannon = self._active_cannon()
+        if aim_delta:
+            cannon.adjust_aim(aim_delta)
+        if speed_delta:
+            cannon.adjust_speed(speed_delta)
+
+    def fire_active_cannon(self):
+        if self.winner or self.paused:
+            return
+        self.projectiles.append(self._active_cannon().fire())
+        self._advance_turn()
 
     def _despawn_destroyed_blocks(self):
         self.blocks[:] = [block for block in self.blocks if block.body.active]
@@ -408,8 +376,12 @@ class Game:
 
         self.left_cannon.draw(self.screen)
         self.right_cannon.draw(self.screen)
-        self.left_gatling.draw(self.screen)
-        self.right_gatling.draw(self.screen)
+
+        for cannon in (self.left_cannon, self.right_cannon):
+            tracer = cannon.tracer_points()
+            if len(tracer) > 1:
+                color = LEFT_COLOR if cannon.side == "left" else RIGHT_COLOR
+                pygame.draw.lines(self.screen, color, False, tracer, 2)
 
         for proj in self.projectiles:
             pygame.draw.circle(self.screen, PROJECTILE_COLOR, proj.body.rect.center, 5)
@@ -417,20 +389,23 @@ class Game:
         self.left_caterpillar.draw(self.screen)
         self.right_caterpillar.draw(self.screen)
 
-        caption = (
-            "Caterpillar Fall · Cannons auto-fire every 3s · "
-            "Gatlings burst 20 shots every 60s · Castles fortify every 30s"
-        )
+        caption = "Caterpillar Fall · Turn-based artillery · One shot per turn · Castles fortify every 30s"
         self.screen.blit(self.font.render(caption, True, TEXT_COLOR), (24, 16))
-        pause_hint = "Press P to pause/resume"
+        pause_hint = "Controls: Up/Down aim, Left/Right power, Space fire, P pause"
         self.screen.blit(self.font.render(pause_hint, True, TEXT_COLOR), (24, 46))
+        turn_text = f"Turn: {self.current_turn.title()}  |  Time left: {max(0.0, self.turn_timer):04.1f}s"
+        self.screen.blit(self.font.render(turn_text, True, TEXT_COLOR), (24, 76))
+        speed_text = (
+            f"Left speed {int(self.left_cannon.muzzle_speed)}  |  Right speed {int(self.right_cannon.muzzle_speed)}"
+        )
+        self.screen.blit(self.font.render(speed_text, True, TEXT_COLOR), (24, 106))
         if self.paused:
             paused_text = self.font.render("Paused", True, (180, 30, 30))
-            self.screen.blit(paused_text, (WIDTH // 2 - paused_text.get_width() // 2, 76))
+            self.screen.blit(paused_text, (WIDTH // 2 - paused_text.get_width() // 2, 136))
         if self.winner:
             msg = f"{self.winner} side wins!"
             text = self.font.render(msg, True, (180, 30, 30))
-            self.screen.blit(text, (WIDTH // 2 - text.get_width() // 2, 106))
+            self.screen.blit(text, (WIDTH // 2 - text.get_width() // 2, 166))
 
         pygame.display.flip()
 
@@ -445,8 +420,21 @@ class Game:
                     running = False
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_p:
                     self.paused = not self.paused
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+                    self.fire_active_cannon()
 
             if not self.paused:
+                keys = pygame.key.get_pressed()
+                aim_speed_deg = 55 * dt
+                power_speed = 480 * dt
+                if keys[pygame.K_UP]:
+                    self.adjust_active_cannon(aim_delta=aim_speed_deg)
+                if keys[pygame.K_DOWN]:
+                    self.adjust_active_cannon(aim_delta=-aim_speed_deg)
+                if keys[pygame.K_RIGHT]:
+                    self.adjust_active_cannon(speed_delta=power_speed)
+                if keys[pygame.K_LEFT]:
+                    self.adjust_active_cannon(speed_delta=-power_speed)
                 self.update(dt)
             self.draw()
 
