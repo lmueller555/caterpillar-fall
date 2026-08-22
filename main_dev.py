@@ -31,6 +31,14 @@ PROJECTILE_COLOR = (40, 20, 15)
 LEFT_COLOR = (65, 206, 110)
 RIGHT_COLOR = (230, 135, 65)
 TEXT_COLOR = (25, 25, 25)
+MENU_BACKDROP = (28, 34, 44, 225)
+MENU_HIGHLIGHT = (244, 194, 66)
+
+DAMAGE_OPTIONS = (
+    ("Normal", 1),
+    ("High", 2),
+    ("Extreme", 4),
+)
 
 
 class CastleBlock:
@@ -69,12 +77,12 @@ class CastleBlock:
 
         return [pristine, slight, major]
 
-    def apply_impact(self, amount: float):
+    def apply_impact(self, amount: int = 1):
         if not self.body.active or amount <= 0:
             return False
 
         self.body.dynamic = True
-        self.hit_count += 1
+        self.hit_count += amount
         if self.hit_count >= self.MAX_HITS:
             self.body.active = False
             return True
@@ -229,6 +237,8 @@ class Game:
         self.winner = None
         self.fortify_timer = FORTIFY_INTERVAL
         self.paused = False
+        self.options_open = False
+        self.damage_option_index = 0
         self.current_turn = "left"
         self.turn_timer = TURN_TIME_LIMIT
 
@@ -251,6 +261,7 @@ class Game:
         self.winner = None
         self.fortify_timer = FORTIFY_INTERVAL
         self.paused = False
+        self.options_open = False
         self.current_turn = "left"
         self.turn_timer = TURN_TIME_LIMIT
 
@@ -281,8 +292,7 @@ class Game:
             if block.side != target_side:
                 continue
             if proj.body.rect.colliderect(block.body.rect):
-                impact_momentum = proj.body.vel.length() * proj.body.mass
-                block.apply_impact(impact_momentum * 1.05)
+                block.apply_impact(self.damage_per_shot)
                 block.body.vel += proj.body.vel * (
                     BLOCK_DIRECT_IMPACT_BOOST * proj.body.mass / max(1.0, block.body.mass)
                 )
@@ -295,7 +305,7 @@ class Game:
                     distance = hit_point.distance_to(nearby.body.center_vec())
                     if distance < BLOCK_SPLASH_RADIUS:
                         splash = max(0.0, (BLOCK_SPLASH_RADIUS - distance) * BLOCK_SPLASH_FORCE)
-                        nearby.apply_impact(splash)
+                        nearby.apply_impact(self.damage_per_shot)
                         nudge = nearby.body.center_vec() - hit_point
                         if nudge.length_squared() > 0:
                             nearby.body.vel += nudge.normalize() * (splash * BLOCK_SPLASH_NUDGE)
@@ -335,6 +345,17 @@ class Game:
         if self.current_turn == "left":
             return self.left_cannon
         return self.right_cannon
+
+    @property
+    def damage_per_shot(self) -> int:
+        return DAMAGE_OPTIONS[self.damage_option_index][1]
+
+    @property
+    def damage_option_name(self) -> str:
+        return DAMAGE_OPTIONS[self.damage_option_index][0]
+
+    def adjust_damage_option(self, direction: int):
+        self.damage_option_index = (self.damage_option_index + direction) % len(DAMAGE_OPTIONS)
 
     def _advance_turn(self):
         self.current_turn = "right" if self.current_turn == "left" else "left"
@@ -414,7 +435,7 @@ class Game:
 
         caption = "Caterpillar Fall · Turn-based artillery · One shot per turn · Castles fortify every 30s"
         self.screen.blit(self.font.render(caption, True, TEXT_COLOR), (24, 16))
-        pause_hint = "Controls: Up/Down aim, Left/Right power, Space fire, P pause, R restart"
+        pause_hint = "Controls: Up/Down aim, Left/Right power, Space fire, P pause, O options, R restart"
         self.screen.blit(self.font.render(pause_hint, True, TEXT_COLOR), (24, 46))
         turn_text = f"Turn: {self.current_turn.title()}  |  Time left: {max(0.0, self.turn_timer):04.1f}s"
         self.screen.blit(self.font.render(turn_text, True, TEXT_COLOR), (24, 76))
@@ -430,7 +451,34 @@ class Game:
             text = self.font.render(msg, True, (180, 30, 30))
             self.screen.blit(text, (WIDTH // 2 - text.get_width() // 2, 166))
 
+        if self.options_open:
+            self._draw_options_menu()
+
         pygame.display.flip()
+
+    def _draw_options_menu(self):
+        menu_width = min(620, WIDTH - 80)
+        menu_height = 280
+        menu_rect = pygame.Rect(0, 0, menu_width, menu_height)
+        menu_rect.center = (WIDTH // 2, HEIGHT // 2)
+
+        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 105))
+        self.screen.blit(overlay, (0, 0))
+        panel = pygame.Surface(menu_rect.size, pygame.SRCALPHA)
+        panel.fill(MENU_BACKDROP)
+        self.screen.blit(panel, menu_rect.topleft)
+        pygame.draw.rect(self.screen, MENU_HIGHLIGHT, menu_rect, 3, border_radius=8)
+
+        title = self.font.render("Options", True, (255, 255, 255))
+        self.screen.blit(title, (menu_rect.centerx - title.get_width() // 2, menu_rect.top + 28))
+
+        option_text = f"Damage     <  {self.damage_option_name} ({self.damage_per_shot}x)  >"
+        option = self.font.render(option_text, True, MENU_HIGHLIGHT)
+        self.screen.blit(option, (menu_rect.centerx - option.get_width() // 2, menu_rect.top + 112))
+
+        hint = self.font.render("Left/Right to change  ·  O or Esc to close", True, (225, 225, 225))
+        self.screen.blit(hint, (menu_rect.centerx - hint.get_width() // 2, menu_rect.bottom - 58))
 
     def run(self):
         running = True
@@ -440,15 +488,27 @@ class Game:
                 if event.type == pygame.QUIT:
                     running = False
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                    running = False
+                    if self.options_open:
+                        self.options_open = False
+                    else:
+                        running = False
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_o:
+                    self.options_open = not self.options_open
+                if event.type == pygame.KEYDOWN and self.options_open:
+                    if event.key == pygame.K_LEFT:
+                        self.adjust_damage_option(-1)
+                    elif event.key == pygame.K_RIGHT:
+                        self.adjust_damage_option(1)
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_p:
-                    self.paused = not self.paused
+                    if not self.options_open:
+                        self.paused = not self.paused
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
-                    self.fire_active_cannon()
+                    if not self.options_open:
+                        self.fire_active_cannon()
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_r and self.winner:
                     self.reset_game()
 
-            if not self.paused:
+            if not self.paused and not self.options_open:
                 keys = pygame.key.get_pressed()
                 aim_speed_deg = 55 * dt
                 power_speed = 480 * dt
