@@ -51,8 +51,11 @@ RADIUS_OPTIONS = (15, 25, 35, BLOCK_SPLASH_RADIUS, 70, 90, 120)
 IMPACT_FORCE_OPTIONS = (0.75, 1.25, 2.0, BLOCK_DIRECT_IMPACT_BOOST, 4.0, 5.5, 7.5)
 SPLASH_FORCE_OPTIONS = (1.0, 2.0, 3.0, BLOCK_SPLASH_FORCE, 6.0, 8.0, 11.0)
 SPLASH_NUDGE_OPTIONS = (0.5, 1.0, 2.0, BLOCK_SPLASH_NUDGE, 4.0, 5.5, 7.0)
-CANNON_RAIN_MIN_INTERVAL = 1.25
-CANNON_RAIN_MAX_INTERVAL = 4.0
+# Rain is intentionally frantic by default: these bounds are one tenth of the
+# original 1.25--4.0 second range.  The range keeps each spawn unpredictable.
+CANNON_RAIN_MIN_INTERVAL = 0.125
+CANNON_RAIN_MAX_INTERVAL = 0.4
+CANNON_RAIN_SPEED_OPTIONS = (1, 2, 3, 5, 10, 20, 50)
 CANNON_RAIN_MIN_FALL_SPEED = 180
 CANNON_RAIN_MAX_FALL_SPEED = 360
 
@@ -265,15 +268,16 @@ class Game:
         self.splash_force_option_index = 3
         self.splash_nudge_option_index = 3
         self.cannon_rain_enabled = False
+        self.cannon_rain_speed_option_index = 0
         self.cannon_rain_timer = self._next_cannon_rain_interval()
         self.selected_option_index = 0
         self.current_turn = "left"
         self.turn_timer = TURN_TIME_LIMIT
 
-    @staticmethod
-    def _next_cannon_rain_interval() -> float:
+    def _next_cannon_rain_interval(self) -> float:
         """Return a fresh delay so the rain does not settle into a rhythm."""
-        return random.uniform(CANNON_RAIN_MIN_INTERVAL, CANNON_RAIN_MAX_INTERVAL)
+        random_interval = random.uniform(CANNON_RAIN_MIN_INTERVAL, CANNON_RAIN_MAX_INTERVAL)
+        return random_interval / self.cannon_rain_speed
 
     def _spawn_raining_cannon_ball(self):
         """Drop a neutral cannon ball at a random point across the battlefield."""
@@ -451,6 +455,10 @@ class Game:
     def splash_nudge(self) -> float:
         return SPLASH_NUDGE_OPTIONS[self.splash_nudge_option_index]
 
+    @property
+    def cannon_rain_speed(self) -> int:
+        return CANNON_RAIN_SPEED_OPTIONS[self.cannon_rain_speed_option_index]
+
     def adjust_selected_option(self, direction: int):
         option_attributes = (
             ("damage_option_index", DAMAGE_OPTIONS),
@@ -459,6 +467,7 @@ class Game:
             ("splash_force_option_index", SPLASH_FORCE_OPTIONS),
             ("splash_nudge_option_index", SPLASH_NUDGE_OPTIONS),
             ("cannon_rain_enabled", (False, True)),
+            ("cannon_rain_speed_option_index", CANNON_RAIN_SPEED_OPTIONS),
         )
         attribute, values = option_attributes[self.selected_option_index]
         if attribute == "cannon_rain_enabled":
@@ -466,6 +475,8 @@ class Game:
             self.cannon_rain_timer = self._next_cannon_rain_interval()
             return
         setattr(self, attribute, (getattr(self, attribute) + direction) % len(values))
+        if attribute == "cannon_rain_speed_option_index":
+            self.cannon_rain_timer = self._next_cannon_rain_interval()
 
     def _advance_turn(self):
         self.current_turn = "right" if self.current_turn == "left" else "left"
@@ -541,7 +552,7 @@ class Game:
 
     def _draw_options_menu(self):
         menu_width = min(700, WIDTH - 80)
-        menu_height = 478
+        menu_height = 526
         menu_rect = pygame.Rect(0, 0, menu_width, menu_height)
         menu_rect.center = (WIDTH // 2, HEIGHT // 2)
 
@@ -563,6 +574,7 @@ class Game:
             f"Splash force       <  {self.splash_force:.2f}x  >",
             f"Splash nudge       <  {self.splash_nudge:.2f}x  >",
             f"Cannon ball rain   <  {'On' if self.cannon_rain_enabled else 'Off'}  >",
+            f"Rain rate speed    <  {self.cannon_rain_speed}x  >",
         )
         for index, option_text in enumerate(option_texts):
             color = MENU_HIGHLIGHT if index == self.selected_option_index else (225, 225, 225)
@@ -593,9 +605,9 @@ class Game:
                     elif event.key == pygame.K_RIGHT:
                         self.adjust_selected_option(1)
                     elif event.key == pygame.K_UP:
-                        self.selected_option_index = (self.selected_option_index - 1) % 6
+                        self.selected_option_index = (self.selected_option_index - 1) % 7
                     elif event.key == pygame.K_DOWN:
-                        self.selected_option_index = (self.selected_option_index + 1) % 6
+                        self.selected_option_index = (self.selected_option_index + 1) % 7
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_p:
                     if not self.options_open:
                         self.paused = not self.paused
