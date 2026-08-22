@@ -62,16 +62,23 @@ CANNON_RAIN_MAX_FALL_SPEED = 360
 # The two edge-mounted gatlings share a burst clock.  Each weapon fires the
 # full burst, so an attack sends an equal crossfire from both sides.
 GATLING_BURST_SIZE = 150
-GATLING_FIRE_RATE_OPTIONS = (5, 10, 15, 20, 30)
+GATLING_FIRE_RATE_OPTIONS = (5, 10, 15, 20, 25, 30, 35, 40, 45, 50)
 GATLING_INTERVAL_OPTIONS = (
+    (5, 10),
     (10, 15),
+    (15, 20),
     (20, 30),
     (30, 45),
     (45, 60),
+    (60, 75),
+    (75, 90),
+    (90, 105),
+    (105, 120),
 )
-GATLING_AIM_OPTIONS = (-30, -15, 0, 15, 30)
-GATLING_MUZZLE_SPEED = 1050
+GATLING_AIM_OPTIONS = (-45, -40, -35, -30, -25, -20, -15, -10, -5, 0)
+GATLING_POWER_OPTIONS = (1500, 1750, 2000, 2250, 2500, 2750, 3000, 3250, 3500, 3750)
 GATLING_SPRAY_DEGREES = 8
+OPTION_MENU_COUNT = 12
 
 # Tornado dimensions and force constants are expressed in screen-space units.
 # Forces taper continuously at the influence boundary, which avoids the abrupt
@@ -368,9 +375,9 @@ class Gatling:
         self.side = side
         self.base = pygame.Vector2(0 if side == "left" else WIDTH, HEIGHT * 0.5)
 
-    def fire(self, aim_angle_deg: float) -> Projectile:
-        # Positive aim angles point down on both sides. Mirror the horizontal
-        # component for the right-hand mount and add per-round barrel spread.
+    def fire(self, aim_angle_deg: float, power: int) -> Projectile:
+        # Mirror the horizontal component for the right-hand mount and add
+        # per-round barrel spread.
         spray_angle = math.radians(
             aim_angle_deg
             + random.uniform(-GATLING_SPRAY_DEGREES, GATLING_SPRAY_DEGREES)
@@ -379,7 +386,7 @@ class Gatling:
         velocity = pygame.Vector2(
             horizontal * math.cos(spray_angle),
             math.sin(spray_angle),
-        ) * random.uniform(GATLING_MUZZLE_SPEED * 0.9, GATLING_MUZZLE_SPEED * 1.1)
+        ) * random.uniform(power * 0.9, power * 1.1)
         return Projectile(self.base.copy(), velocity, self.side)
 
     def draw(self, surface: pygame.Surface, aim_angle_deg: float) -> None:
@@ -447,8 +454,9 @@ class Game:
         self.tornado_enabled = False
         self.tornado = Tornado()
         self.gatling_fire_rate_option_index = 1
-        self.gatling_interval_option_index = 1
-        self.gatling_aim_option_index = 3
+        self.gatling_interval_option_index = 3
+        self.gatling_aim_option_index = 6
+        self.gatling_power_option_index = 4
         self.gatling_timer = self._next_gatling_interval()
         self.gatling_rounds_remaining = 0
         self.gatling_shot_timer = 0.0
@@ -490,7 +498,7 @@ class Game:
             shot_interval = 1.0 / self.gatling_fire_rate
             while self.gatling_shot_timer <= 0 and self.gatling_rounds_remaining:
                 for gatling in self.gatlings:
-                    self.projectiles.append(gatling.fire(self.gatling_aim_angle))
+                    self.projectiles.append(gatling.fire(self.gatling_aim_angle, self.gatling_power))
                 self.gatling_rounds_remaining -= 1
                 self.gatling_shot_timer += shot_interval
 
@@ -686,6 +694,10 @@ class Game:
     def gatling_aim_angle(self) -> int:
         return GATLING_AIM_OPTIONS[self.gatling_aim_option_index]
 
+    @property
+    def gatling_power(self) -> int:
+        return GATLING_POWER_OPTIONS[self.gatling_power_option_index]
+
     def adjust_selected_option(self, direction: int):
         option_attributes = (
             ("damage_option_index", DAMAGE_OPTIONS),
@@ -699,6 +711,7 @@ class Game:
             ("gatling_fire_rate_option_index", GATLING_FIRE_RATE_OPTIONS),
             ("gatling_interval_option_index", GATLING_INTERVAL_OPTIONS),
             ("gatling_aim_option_index", GATLING_AIM_OPTIONS),
+            ("gatling_power_option_index", GATLING_POWER_OPTIONS),
         )
         attribute, values = option_attributes[self.selected_option_index]
         if attribute in ("cannon_rain_enabled", "tornado_enabled"):
@@ -818,6 +831,7 @@ class Game:
             f"Gatling fire rate  <  {self.gatling_fire_rate} rounds/s  >",
             f"Gatling interval   <  {self.gatling_interval[0]}-{self.gatling_interval[1]} s  >",
             f"Gatling aim        <  {self.gatling_aim_angle:+d} deg  >",
+            f"Gatling power      <  {self.gatling_power} px/s  >",
         )
         for index, option_text in enumerate(option_texts):
             color = MENU_HIGHLIGHT if index == self.selected_option_index else (225, 225, 225)
@@ -852,9 +866,13 @@ class Game:
                     elif event.key == pygame.K_RIGHT:
                         self.adjust_selected_option(1)
                     elif event.key == pygame.K_UP:
-                        self.selected_option_index = (self.selected_option_index - 1) % 11
+                        self.selected_option_index = (
+                            self.selected_option_index - 1
+                        ) % OPTION_MENU_COUNT
                     elif event.key == pygame.K_DOWN:
-                        self.selected_option_index = (self.selected_option_index + 1) % 11
+                        self.selected_option_index = (
+                            self.selected_option_index + 1
+                        ) % OPTION_MENU_COUNT
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_p:
                     if not self.options_open:
                         self.paused = not self.paused
