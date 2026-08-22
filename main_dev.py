@@ -237,9 +237,10 @@ class Game:
         self.font = pygame.font.SysFont("menlo", 24)
 
         self.castle_rows = 12
-        self.castle_cols = 12
-        self.left_castle_start_x = 120
-        self.right_castle_start_x = WIDTH - 120 - self.castle_cols * 34
+        self.castle_cols = 16
+        castle_margin = 70
+        self.left_castle_start_x = castle_margin
+        self.right_castle_start_x = WIDTH - castle_margin - self.castle_cols * 34
 
         self.left_blocks = self._build_castle("left", self.left_castle_start_x)
         self.right_blocks = self._build_castle("right", self.right_castle_start_x)
@@ -249,8 +250,8 @@ class Game:
         self.right_caterpillar = self._build_castle_caterpillar("right", self.right_castle_start_x)
         self.caterpillars = [self.left_caterpillar, self.right_caterpillar]
 
-        self.left_cannon = Cannon("left", 90)
-        self.right_cannon = Cannon("right", WIDTH - 90)
+        self.left_cannon = Cannon("left", 40)
+        self.right_cannon = Cannon("right", WIDTH - 40)
 
         self.projectiles: list[Projectile] = []
         self.physics = PhysicsEngine(self.blocks, self.caterpillars)
@@ -293,8 +294,8 @@ class Game:
         self.right_caterpillar = self._build_castle_caterpillar("right", self.right_castle_start_x)
         self.caterpillars = [self.left_caterpillar, self.right_caterpillar]
 
-        self.left_cannon = Cannon("left", 90)
-        self.right_cannon = Cannon("right", WIDTH - 90)
+        self.left_cannon = Cannon("left", 40)
+        self.right_cannon = Cannon("right", WIDTH - 40)
 
         self.projectiles = []
         self.physics = PhysicsEngine(self.blocks, self.caterpillars)
@@ -312,15 +313,29 @@ class Game:
         block_rect_h = block_h - 2
         cols = self.castle_cols
         blocks = []
-        # Rows are counted from the ground upward.  Two foundation courses,
-        # thick side walls, a roof, and crenellations form a recognizable
-        # castle around an open chamber.  The lone block in the chamber is the
-        # caterpillar's seat and keeps it safely above the ground.
+        # Rows are counted from the ground upward.  The silhouette is a proper
+        # fortified castle: broad foundations, two tall corner towers with
+        # window openings, a lower central keep, and alternating battlements.
+        # The open room in the keep shelters the caterpillar on a block seat.
         occupied_cells = set()
         occupied_cells.update((row, col) for row in range(2) for col in range(cols))
-        occupied_cells.update((row, col) for row in range(2, 8) for col in (0, 1, cols - 2, cols - 1))
-        occupied_cells.update((7, col) for col in range(cols))
-        occupied_cells.update((8, col) for col in range(cols) if col % 3 != 2)
+
+        tower_columns = tuple(range(4)) + tuple(range(cols - 4, cols))
+        occupied_cells.update((row, col) for row in range(2, 11) for col in tower_columns)
+
+        # Narrow arrow-slit windows break up the otherwise solid corner towers.
+        for row in (5, 6):
+            occupied_cells.discard((row, 1))
+            occupied_cells.discard((row, cols - 2))
+
+        # The central keep has two-block-thick walls and a solid parapet roof.
+        occupied_cells.update((row, col) for row in range(2, 9) for col in (4, 5, cols - 6, cols - 5))
+        occupied_cells.update((8, col) for col in range(4, cols - 4))
+
+        # Merlons along both tower tops and the keep roof make the outline read
+        # as a castle even when some blocks have already been knocked loose.
+        occupied_cells.update((11, col) for col in tower_columns if col % 2 == 0)
+        occupied_cells.update((9, col) for col in range(4, cols - 4) if col % 2 == 0)
         occupied_cells.add((2, self._castle_seat_col(side)))
 
         for row, col in sorted(occupied_cells):
@@ -330,7 +345,7 @@ class Game:
         return blocks
 
     def _castle_seat_col(self, side: str) -> int:
-        return 4 if side == "left" else self.castle_cols - 5
+        return 7 if side == "left" else self.castle_cols - 8
 
     def _build_castle_caterpillar(self, side: str, start_x: int) -> Caterpillar:
         block_w = 34
