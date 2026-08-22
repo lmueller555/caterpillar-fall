@@ -9,7 +9,7 @@ from physics_dev import Body, GRAVITY, PhysicsEngine, set_ground_y, set_screen_w
 WIDTH = 1280
 HEIGHT = 720
 FPS = 60
-FORTIFY_INTERVAL = 30.0
+CASTLE_HEAL_INTERVAL = 30.0
 CANNON_MUZZLE_SPEED = 1530
 CANNON_MIN_SPEED = 900
 CANNON_MAX_SPEED = 1800
@@ -103,6 +103,12 @@ class CastleBlock:
             self.body.active = False
             return True
         return False
+
+    def heal(self, amount: int = 1):
+        """Repair damage without reviving a block that has been destroyed."""
+        if not self.body.active or amount <= 0:
+            return
+        self.hit_count = max(0, self.hit_count - amount)
 
     @property
     def sprite(self):
@@ -239,10 +245,8 @@ class Game:
         self.right_blocks = self._build_castle("right", self.right_castle_start_x)
         self.blocks = self.left_blocks + self.right_blocks
 
-        left_top = min(b.body.rect.top for b in self.left_blocks)
-        right_top = min(b.body.rect.top for b in self.right_blocks)
-        self.left_caterpillar = Caterpillar(170, left_top - 24, "left")
-        self.right_caterpillar = Caterpillar(WIDTH - 220, right_top - 24, "right")
+        self.left_caterpillar = self._build_castle_caterpillar("left", self.left_castle_start_x)
+        self.right_caterpillar = self._build_castle_caterpillar("right", self.right_castle_start_x)
         self.caterpillars = [self.left_caterpillar, self.right_caterpillar]
 
         self.left_cannon = Cannon("left", 90)
@@ -251,7 +255,7 @@ class Game:
         self.projectiles: list[Projectile] = []
         self.physics = PhysicsEngine(self.blocks, self.caterpillars)
         self.winner = None
-        self.fortify_timer = FORTIFY_INTERVAL
+        self.castle_heal_timer = CASTLE_HEAL_INTERVAL
         self.paused = False
         self.options_open = False
         self.damage_option_index = 0
@@ -285,10 +289,8 @@ class Game:
         self.right_blocks = self._build_castle("right", self.right_castle_start_x)
         self.blocks = self.left_blocks + self.right_blocks
 
-        left_top = min(b.body.rect.top for b in self.left_blocks)
-        right_top = min(b.body.rect.top for b in self.right_blocks)
-        self.left_caterpillar = Caterpillar(170, left_top - 24, "left")
-        self.right_caterpillar = Caterpillar(WIDTH - 220, right_top - 24, "right")
+        self.left_caterpillar = self._build_castle_caterpillar("left", self.left_castle_start_x)
+        self.right_caterpillar = self._build_castle_caterpillar("right", self.right_castle_start_x)
         self.caterpillars = [self.left_caterpillar, self.right_caterpillar]
 
         self.left_cannon = Cannon("left", 90)
@@ -297,7 +299,7 @@ class Game:
         self.projectiles = []
         self.physics = PhysicsEngine(self.blocks, self.caterpillars)
         self.winner = None
-        self.fortify_timer = FORTIFY_INTERVAL
+        self.castle_heal_timer = CASTLE_HEAL_INTERVAL
         self.paused = False
         self.options_open = False
         self.current_turn = "left"
@@ -308,17 +310,36 @@ class Game:
         block_w = 34
         block_h = 24
         block_rect_h = block_h - 2
-        rows = self.castle_rows
         cols = self.castle_cols
         blocks = []
-        for row in range(rows):
-            for col in range(cols):
-                if row in (1, 4, 7) and col in (0, cols - 1):
-                    continue
-                x = start_x + col * block_w
-                y = GROUND_Y - block_rect_h - (rows - 1 - row) * block_h
-                blocks.append(CastleBlock(pygame.Rect(x, y, block_w - 2, block_rect_h), side))
+        # Rows are counted from the ground upward.  Two foundation courses,
+        # thick side walls, a roof, and crenellations form a recognizable
+        # castle around an open chamber.  The lone block in the chamber is the
+        # caterpillar's seat and keeps it safely above the ground.
+        occupied_cells = set()
+        occupied_cells.update((row, col) for row in range(2) for col in range(cols))
+        occupied_cells.update((row, col) for row in range(2, 8) for col in (0, 1, cols - 2, cols - 1))
+        occupied_cells.update((7, col) for col in range(cols))
+        occupied_cells.update((8, col) for col in range(cols) if col % 3 != 2)
+        occupied_cells.add((2, self._castle_seat_col(side)))
+
+        for row, col in sorted(occupied_cells):
+            x = start_x + col * block_w
+            y = GROUND_Y - block_rect_h - row * block_h
+            blocks.append(CastleBlock(pygame.Rect(x, y, block_w - 2, block_rect_h), side))
         return blocks
+
+    def _castle_seat_col(self, side: str) -> int:
+        return 4 if side == "left" else self.castle_cols - 5
+
+    def _build_castle_caterpillar(self, side: str, start_x: int) -> Caterpillar:
+        block_w = 34
+        block_h = 24
+        seat_col = self._castle_seat_col(side)
+        x = start_x + seat_col * block_w - 1
+        # The seat occupies row two, immediately above the foundation.
+        y = GROUND_Y - 3 * block_h - 24
+        return Caterpillar(x, y, side)
 
     def _projectile_hits(self, proj: Projectile):
         target_side = None if proj.owner == "rain" else ("right" if proj.owner == "left" else "left")
@@ -376,10 +397,10 @@ class Game:
 
         self.physics.update(dt)
 
-        self.fortify_timer -= dt
-        while self.fortify_timer <= 0:
-            self._fortify_castles()
-            self.fortify_timer += FORTIFY_INTERVAL
+        self.castle_heal_timer -= dt
+        while self.castle_heal_timer <= 0:
+            self._heal_castles()
+            self.castle_heal_timer += CASTLE_HEAL_INTERVAL
 
         if self.left_caterpillar.fallen:
             self.winner = "Right"
@@ -453,37 +474,10 @@ class Game:
         self.left_blocks[:] = [block for block in self.left_blocks if block.body.active]
         self.right_blocks[:] = [block for block in self.right_blocks if block.body.active]
 
-    def _fortify_castle(self, blocks: list[CastleBlock], side: str):
-        if not blocks:
-            return
-
-        block_h = max(block.body.rect.height for block in blocks) + 2
-        block_w = max(block.body.rect.width for block in blocks) + 2
-
-        for block in blocks:
-            block.body.rect.y -= block_h
-
-        for caterpillar in self.caterpillars:
-            if caterpillar.side == side and not caterpillar.fallen:
-                caterpillar.body.rect.y -= block_h
-
-        cols = self.castle_cols
-        if side == "left":
-            min_x = self.left_castle_start_x
-        else:
-            min_x = self.right_castle_start_x
-        new_blocks = []
-        for col in range(cols):
-            x = min_x + col * block_w
-            y = GROUND_Y - (block_h - 2)
-            new_blocks.append(CastleBlock(pygame.Rect(x, y, block_w - 2, block_h - 2), side))
-
-        blocks.extend(new_blocks)
-        self.blocks.extend(new_blocks)
-
-    def _fortify_castles(self):
-        self._fortify_castle(self.left_blocks, "left")
-        self._fortify_castle(self.right_blocks, "right")
+    def _heal_castles(self):
+        """Repair every surviving castle block by one current shot's damage."""
+        for block in self.blocks:
+            block.heal(self.damage_per_shot)
 
     def draw(self):
         self.screen.fill(SKY)
@@ -507,7 +501,7 @@ class Game:
         self.left_caterpillar.draw(self.screen)
         self.right_caterpillar.draw(self.screen)
 
-        caption = "Caterpillar Fall · Turn-based artillery · One shot per turn · Castles fortify every 30s"
+        caption = "Caterpillar Fall · One shot per turn · Castle blocks heal every 30s"
         self.screen.blit(self.font.render(caption, True, TEXT_COLOR), (24, 16))
         pause_hint = "Controls: Up/Down aim, Left/Right power, Space fire, P pause, O options, R restart"
         self.screen.blit(self.font.render(pause_hint, True, TEXT_COLOR), (24, 46))
