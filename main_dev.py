@@ -38,7 +38,18 @@ DAMAGE_OPTIONS = (
     ("Normal", 1),
     ("High", 2),
     ("Extreme", 4),
+    ("Devastating", 5),
+    ("10x", 10),
+    ("20x", 20),
+    ("50x", 50),
 )
+
+# Each collision setting has seven steps and keeps the original value in the
+# middle. This makes it easy to experiment without losing the default feel.
+RADIUS_OPTIONS = (15, 25, 35, BLOCK_SPLASH_RADIUS, 70, 90, 120)
+IMPACT_FORCE_OPTIONS = (0.75, 1.25, 2.0, BLOCK_DIRECT_IMPACT_BOOST, 4.0, 5.5, 7.5)
+SPLASH_FORCE_OPTIONS = (1.0, 2.0, 3.0, BLOCK_SPLASH_FORCE, 6.0, 8.0, 11.0)
+SPLASH_NUDGE_OPTIONS = (0.5, 1.0, 2.0, BLOCK_SPLASH_NUDGE, 4.0, 5.5, 7.0)
 
 
 class CastleBlock:
@@ -239,6 +250,11 @@ class Game:
         self.paused = False
         self.options_open = False
         self.damage_option_index = 0
+        self.radius_option_index = 3
+        self.impact_force_option_index = 3
+        self.splash_force_option_index = 3
+        self.splash_nudge_option_index = 3
+        self.selected_option_index = 0
         self.current_turn = "left"
         self.turn_timer = TURN_TIME_LIMIT
 
@@ -294,7 +310,7 @@ class Game:
             if proj.body.rect.colliderect(block.body.rect):
                 block.apply_impact(self.damage_per_shot)
                 block.body.vel += proj.body.vel * (
-                    BLOCK_DIRECT_IMPACT_BOOST * proj.body.mass / max(1.0, block.body.mass)
+                    self.impact_force * proj.body.mass / max(1.0, block.body.mass)
                 )
 
                 for nearby in self.blocks:
@@ -303,12 +319,12 @@ class Game:
                     if nearby.side != target_side or nearby is block:
                         continue
                     distance = hit_point.distance_to(nearby.body.center_vec())
-                    if distance < BLOCK_SPLASH_RADIUS:
-                        splash = max(0.0, (BLOCK_SPLASH_RADIUS - distance) * BLOCK_SPLASH_FORCE)
+                    if distance < self.splash_radius:
+                        splash = max(0.0, (self.splash_radius - distance) * self.splash_force)
                         nearby.apply_impact(self.damage_per_shot)
                         nudge = nearby.body.center_vec() - hit_point
                         if nudge.length_squared() > 0:
-                            nearby.body.vel += nudge.normalize() * (splash * BLOCK_SPLASH_NUDGE)
+                            nearby.body.vel += nudge.normalize() * (splash * self.splash_nudge)
                 proj.alive = False
                 return
 
@@ -354,8 +370,32 @@ class Game:
     def damage_option_name(self) -> str:
         return DAMAGE_OPTIONS[self.damage_option_index][0]
 
-    def adjust_damage_option(self, direction: int):
-        self.damage_option_index = (self.damage_option_index + direction) % len(DAMAGE_OPTIONS)
+    @property
+    def splash_radius(self) -> int:
+        return RADIUS_OPTIONS[self.radius_option_index]
+
+    @property
+    def impact_force(self) -> float:
+        return IMPACT_FORCE_OPTIONS[self.impact_force_option_index]
+
+    @property
+    def splash_force(self) -> float:
+        return SPLASH_FORCE_OPTIONS[self.splash_force_option_index]
+
+    @property
+    def splash_nudge(self) -> float:
+        return SPLASH_NUDGE_OPTIONS[self.splash_nudge_option_index]
+
+    def adjust_selected_option(self, direction: int):
+        option_attributes = (
+            ("damage_option_index", DAMAGE_OPTIONS),
+            ("radius_option_index", RADIUS_OPTIONS),
+            ("impact_force_option_index", IMPACT_FORCE_OPTIONS),
+            ("splash_force_option_index", SPLASH_FORCE_OPTIONS),
+            ("splash_nudge_option_index", SPLASH_NUDGE_OPTIONS),
+        )
+        attribute, values = option_attributes[self.selected_option_index]
+        setattr(self, attribute, (getattr(self, attribute) + direction) % len(values))
 
     def _advance_turn(self):
         self.current_turn = "right" if self.current_turn == "left" else "left"
@@ -457,8 +497,8 @@ class Game:
         pygame.display.flip()
 
     def _draw_options_menu(self):
-        menu_width = min(620, WIDTH - 80)
-        menu_height = 280
+        menu_width = min(700, WIDTH - 80)
+        menu_height = 430
         menu_rect = pygame.Rect(0, 0, menu_width, menu_height)
         menu_rect.center = (WIDTH // 2, HEIGHT // 2)
 
@@ -473,11 +513,20 @@ class Game:
         title = self.font.render("Options", True, (255, 255, 255))
         self.screen.blit(title, (menu_rect.centerx - title.get_width() // 2, menu_rect.top + 28))
 
-        option_text = f"Damage     <  {self.damage_option_name} ({self.damage_per_shot}x)  >"
-        option = self.font.render(option_text, True, MENU_HIGHLIGHT)
-        self.screen.blit(option, (menu_rect.centerx - option.get_width() // 2, menu_rect.top + 112))
+        option_texts = (
+            f"Damage multiplier  <  {self.damage_option_name} ({self.damage_per_shot}x)  >",
+            f"Splash radius      <  {self.splash_radius} px  >",
+            f"Impact force       <  {self.impact_force:.2f}x  >",
+            f"Splash force       <  {self.splash_force:.2f}x  >",
+            f"Splash nudge       <  {self.splash_nudge:.2f}x  >",
+        )
+        for index, option_text in enumerate(option_texts):
+            color = MENU_HIGHLIGHT if index == self.selected_option_index else (225, 225, 225)
+            prefix = "> " if index == self.selected_option_index else "  "
+            option = self.font.render(prefix + option_text, True, color)
+            self.screen.blit(option, (menu_rect.centerx - option.get_width() // 2, menu_rect.top + 88 + index * 48))
 
-        hint = self.font.render("Left/Right to change  ·  O or Esc to close", True, (225, 225, 225))
+        hint = self.font.render("Up/Down select · Left/Right change · O or Esc close", True, (225, 225, 225))
         self.screen.blit(hint, (menu_rect.centerx - hint.get_width() // 2, menu_rect.bottom - 58))
 
     def run(self):
@@ -496,9 +545,13 @@ class Game:
                     self.options_open = not self.options_open
                 if event.type == pygame.KEYDOWN and self.options_open:
                     if event.key == pygame.K_LEFT:
-                        self.adjust_damage_option(-1)
+                        self.adjust_selected_option(-1)
                     elif event.key == pygame.K_RIGHT:
-                        self.adjust_damage_option(1)
+                        self.adjust_selected_option(1)
+                    elif event.key == pygame.K_UP:
+                        self.selected_option_index = (self.selected_option_index - 1) % 5
+                    elif event.key == pygame.K_DOWN:
+                        self.selected_option_index = (self.selected_option_index + 1) % 5
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_p:
                     if not self.options_open:
                         self.paused = not self.paused
