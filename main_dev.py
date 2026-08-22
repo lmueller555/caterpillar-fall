@@ -59,6 +59,128 @@ CANNON_RAIN_SPEED_OPTIONS = (1, 2, 3, 5, 10, 20, 50)
 CANNON_RAIN_MIN_FALL_SPEED = 180
 CANNON_RAIN_MAX_FALL_SPEED = 360
 
+# Tornado dimensions and force constants are expressed in screen-space units.
+# Forces taper continuously at the influence boundary, which avoids the abrupt
+# velocity jumps that a simple collision volume would create.
+TORNADO_INFLUENCE_RADIUS_RATIO = 0.36
+TORNADO_CORE_RADIUS_RATIO = 0.045
+TORNADO_HEIGHT_RATIO = 0.72
+TORNADO_MAX_WIND_SPEED = 1180.0
+TORNADO_UPDRAFT_SPEED = 820.0
+TORNADO_RESPONSE = 3.8
+
+
+class Tornado:
+    """A Rankine-like vortex with inflow, rotation, updraft, and gusts.
+
+    This is intentionally a velocity-field model rather than a single radial
+    impulse.  Air spirals inward outside the core, rotates as a near-solid body
+    inside it, rises more strongly near the funnel, and ejects objects that
+    pass through the very center.  Exponential velocity relaxation keeps the
+    result stable across varying frame rates.
+    """
+
+    def __init__(self):
+        self.age = 0.0
+
+    @property
+    def center(self) -> pygame.Vector2:
+        return pygame.Vector2(WIDTH * 0.5, GROUND_Y)
+
+    @property
+    def influence_radius(self) -> float:
+        return max(260.0, WIDTH * TORNADO_INFLUENCE_RADIUS_RATIO)
+
+    @property
+    def core_radius(self) -> float:
+        return max(48.0, WIDTH * TORNADO_CORE_RADIUS_RATIO)
+
+    @property
+    def height(self) -> float:
+        return HEIGHT * TORNADO_HEIGHT_RATIO
+
+    def update(self, dt: float, blocks: list, projectiles: list) -> None:
+        self.age += dt
+        for block in blocks:
+            if block.body.active:
+                self._apply_wind(block.body, dt, aerodynamic_scale=0.72)
+        for projectile in projectiles:
+            if projectile.alive:
+                self._apply_wind(projectile.body, dt, aerodynamic_scale=1.15)
+
+    def _apply_wind(self, body: Body, dt: float, aerodynamic_scale: float) -> None:
+        position = body.center_vec()
+        offset = position - self.center
+        distance = offset.length()
+        if distance >= self.influence_radius:
+            return
+
+        # Smoothstep falloff represents diminishing winds at the outer edge.
+        normalized = distance / self.influence_radius
+        influence = (1.0 - normalized) ** 2 * (1.0 + 2.0 * normalized)
+        radial = offset.normalize() if distance > 0.01 else pygame.Vector2(1, 0)
+        tangent = pygame.Vector2(-radial.y, radial.x)
+        core_fraction = min(1.0, distance / self.core_radius)
+        rotation = TORNADO_MAX_WIND_SPEED * (
+            core_fraction if distance < self.core_radius else 1.0 / core_fraction
+        )
+
+        # Low-frequency gusts make trajectories irregular without unstable
+        # frame-to-frame random impulses.
+        gust = 1.0 + 0.16 * math.sin(
+            self.age * 4.7 + position.x * 0.021 + position.y * 0.013
+        )
+        inflow_speed = 330.0 * influence * (0.35 + 0.65 * core_fraction)
+        updraft = TORNADO_UPDRAFT_SPEED * influence * (1.0 - 0.45 * normalized)
+        target_velocity = tangent * rotation * gust - radial * inflow_speed
+        target_velocity.y -= updraft
+        # The side-on 2D projection can point the rotational tangent downward;
+        # preserve the vortex's physical vertical updraft in that case.
+        target_velocity.y = min(target_velocity.y, -updraft * 0.35)
+
+        # Objects entering the eye are lofted and expelled instead of becoming
+        # trapped at an infinite-force singularity.
+        if distance < self.core_radius * 0.42:
+            target_velocity += radial * (
+                520.0 * (1.0 - distance / (self.core_radius * 0.42))
+            )
+
+        mass_response = aerodynamic_scale / math.sqrt(max(0.4, body.mass))
+        blend = 1.0 - math.exp(-TORNADO_RESPONSE * influence * mass_response * min(dt, 0.05))
+        if not body.dynamic and influence * aerodynamic_scale > 0.09:
+            body.dynamic = True
+        if body.dynamic:
+            body.vel += (target_velocity - body.vel) * blend
+
+    def draw(self, surface: pygame.Surface) -> None:
+        base_x = int(self.center.x)
+        base_y = int(self.center.y)
+        top_y = int(base_y - self.height)
+        funnel = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+
+        # Translucent, overlapping bands convey a broad rotating funnel while
+        # leaving projectiles and castle pieces readable in front of it.
+        band_count = 18
+        for index in range(band_count):
+            t = index / (band_count - 1)
+            y = int(base_y - t * self.height)
+            half_width = int(
+                self.core_radius
+                * (0.48 + 2.45 * t)
+                * (1.0 + 0.08 * math.sin(self.age * 3.2 + index))
+            )
+            color = (198, 203, 207, 30 + int(42 * (1.0 - t)))
+            pygame.draw.ellipse(funnel, color, (base_x - half_width, y - 16, half_width * 2, 32), 5)
+
+        veil_points = [
+            (base_x - int(self.core_radius * 0.38), base_y),
+            (base_x - int(self.core_radius * 2.7), top_y),
+            (base_x + int(self.core_radius * 2.7), top_y),
+            (base_x + int(self.core_radius * 0.38), base_y),
+        ]
+        pygame.draw.polygon(funnel, (174, 181, 187, 42), veil_points)
+        surface.blit(funnel, (0, 0))
+
 
 class CastleBlock:
     MAX_HITS = 12
@@ -270,6 +392,8 @@ class Game:
         self.cannon_rain_enabled = False
         self.cannon_rain_speed_option_index = 0
         self.cannon_rain_timer = self._next_cannon_rain_interval()
+        self.tornado_enabled = False
+        self.tornado = Tornado()
         self.selected_option_index = 0
         self.current_turn = "left"
         self.turn_timer = TURN_TIME_LIMIT
@@ -310,6 +434,7 @@ class Game:
         self.current_turn = "left"
         self.turn_timer = TURN_TIME_LIMIT
         self.cannon_rain_timer = self._next_cannon_rain_interval()
+        self.tornado = Tornado()
 
     def _build_castle(self, side: str, start_x: int):
         block_w = 34
@@ -408,6 +533,9 @@ class Game:
                 self._spawn_raining_cannon_ball()
                 self.cannon_rain_timer += self._next_cannon_rain_interval()
 
+        if self.tornado_enabled:
+            self.tornado.update(dt, self.blocks, self.projectiles)
+
         for proj in self.projectiles:
             proj.update(dt)
             self._projectile_hits(proj)
@@ -468,11 +596,13 @@ class Game:
             ("splash_nudge_option_index", SPLASH_NUDGE_OPTIONS),
             ("cannon_rain_enabled", (False, True)),
             ("cannon_rain_speed_option_index", CANNON_RAIN_SPEED_OPTIONS),
+            ("tornado_enabled", (False, True)),
         )
         attribute, values = option_attributes[self.selected_option_index]
-        if attribute == "cannon_rain_enabled":
-            self.cannon_rain_enabled = not self.cannon_rain_enabled
-            self.cannon_rain_timer = self._next_cannon_rain_interval()
+        if attribute in ("cannon_rain_enabled", "tornado_enabled"):
+            setattr(self, attribute, not getattr(self, attribute))
+            if attribute == "cannon_rain_enabled":
+                self.cannon_rain_timer = self._next_cannon_rain_interval()
             return
         setattr(self, attribute, (getattr(self, attribute) + direction) % len(values))
         if attribute == "cannon_rain_speed_option_index":
@@ -508,6 +638,9 @@ class Game:
     def draw(self):
         self.screen.fill(SKY)
         pygame.draw.rect(self.screen, GROUND, (0, GROUND_Y, WIDTH, HEIGHT - GROUND_Y))
+
+        if self.tornado_enabled:
+            self.tornado.draw(self.screen)
 
         for block in self.blocks:
             self.screen.blit(block.sprite, block.body.rect.topleft)
@@ -552,7 +685,7 @@ class Game:
 
     def _draw_options_menu(self):
         menu_width = min(700, WIDTH - 80)
-        menu_height = 526
+        menu_height = min(574, HEIGHT - 40)
         menu_rect = pygame.Rect(0, 0, menu_width, menu_height)
         menu_rect.center = (WIDTH // 2, HEIGHT // 2)
 
@@ -575,12 +708,17 @@ class Game:
             f"Splash nudge       <  {self.splash_nudge:.2f}x  >",
             f"Cannon ball rain   <  {'On' if self.cannon_rain_enabled else 'Off'}  >",
             f"Rain rate speed    <  {self.cannon_rain_speed}x  >",
+            f"Center tornado     <  {'On' if self.tornado_enabled else 'Off'}  >",
         )
         for index, option_text in enumerate(option_texts):
             color = MENU_HIGHLIGHT if index == self.selected_option_index else (225, 225, 225)
             prefix = "> " if index == self.selected_option_index else "  "
             option = self.font.render(prefix + option_text, True, color)
-            self.screen.blit(option, (menu_rect.centerx - option.get_width() // 2, menu_rect.top + 88 + index * 48))
+            row_spacing = min(48, (menu_rect.height - 178) // len(option_texts))
+            self.screen.blit(
+                option,
+                (menu_rect.centerx - option.get_width() // 2, menu_rect.top + 82 + index * row_spacing),
+            )
 
         hint = self.font.render("Up/Down select · Left/Right change · O or Esc close", True, (225, 225, 225))
         self.screen.blit(hint, (menu_rect.centerx - hint.get_width() // 2, menu_rect.bottom - 58))
@@ -605,9 +743,9 @@ class Game:
                     elif event.key == pygame.K_RIGHT:
                         self.adjust_selected_option(1)
                     elif event.key == pygame.K_UP:
-                        self.selected_option_index = (self.selected_option_index - 1) % 7
+                        self.selected_option_index = (self.selected_option_index - 1) % 8
                     elif event.key == pygame.K_DOWN:
-                        self.selected_option_index = (self.selected_option_index + 1) % 7
+                        self.selected_option_index = (self.selected_option_index + 1) % 8
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_p:
                     if not self.options_open:
                         self.paused = not self.paused
